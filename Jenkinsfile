@@ -66,11 +66,13 @@ pipeline {
                     usernameVariable: 'DH_USER',
                     passwordVariable: 'DH_PASS'
                 )]) {
-                    sh "echo ${DH_PASS} | docker login -u ${DH_USER} --password-stdin"
-                    sh "docker push ${BACKEND_IMAGE}:${TAG}"
-                    sh "docker push ${BACKEND_IMAGE}:latest"
-                    sh "docker push ${FRONTEND_IMAGE}:${TAG}"
-                    sh "docker push ${FRONTEND_IMAGE}:latest"
+                    sh '''
+                        echo $DH_PASS | docker login -u $DH_USER --password-stdin
+                        docker push ${BACKEND_IMAGE}:${TAG}
+                        docker push ${BACKEND_IMAGE}:latest
+                        docker push ${FRONTEND_IMAGE}:${TAG}
+                        docker push ${FRONTEND_IMAGE}:latest
+                    '''
                 }
             }
         }
@@ -78,8 +80,8 @@ pipeline {
         // ── 5. Deploy Containers ──────────────────────────────────────
         stage('Deploy Containers') {
             steps {
-                sh """
-                    # Stop and remove any existing containers
+                sh '''
+                    # Stop any existing containers
                     docker rm -f aceest-backend aceest-frontend || true
 
                     # Run backend
@@ -89,19 +91,27 @@ pipeline {
                         -e DB_NAME=/tmp/aceest.db \
                         ${BACKEND_IMAGE}:${TAG}
 
-                    # Run frontend linked to backend
+                    # Run frontend
                     docker run -d --name aceest-frontend \
                         -p 3000:80 \
                         --link aceest-backend:backend \
                         ${FRONTEND_IMAGE}:${TAG}
 
-                    # Wait for containers to be ready
+                    # Wait for containers to start
                     sleep 15
 
-                    # Quick sanity check
-                    curl --fail http://localhost:5005/health
+                    # Use container IP directly (Jenkins runs inside Docker
+                    # so localhost does not reach host-mapped ports)
+                    BACKEND_IP=$(docker inspect -f \
+                        '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+                        aceest-backend)
+                    echo "Backend IP: $BACKEND_IP"
+                    curl --fail http://${BACKEND_IP}:5005/health
                     echo "Containers are up"
-                """
+
+                    # Save IP for acceptance tests
+                    echo $BACKEND_IP > /tmp/backend_ip.txt
+                '''
             }
         }
 
@@ -111,7 +121,11 @@ pipeline {
                 sh '''
                     pip install -r acceptance-tests/requirements.txt \
                         --break-system-packages -q
-                    APP_URL=http://localhost:5005 \
+
+                    BACKEND_IP=$(cat /tmp/backend_ip.txt)
+                    echo "Running acceptance tests against http://${BACKEND_IP}:5005"
+
+                    APP_URL=http://${BACKEND_IP}:5005 \
                     ADMIN_USERNAME=admin \
                     ADMIN_PASSWORD=admin123 \
                     python3 -m pytest acceptance-tests/ -v \
