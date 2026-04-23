@@ -26,7 +26,7 @@ pipeline {
             steps {
                 dir('backend') {
                     sh '''
-                        pip install -r requirements.txt --break-system-packages -q
+                        pip install -r requirements.txt pytest-cov --break-system-packages -q
                         python3 -m pytest tests/ -v \
                             --junitxml=test-results.xml \
                             --cov=. \
