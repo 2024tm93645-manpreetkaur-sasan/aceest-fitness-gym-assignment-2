@@ -45,17 +45,20 @@ pipeline {
         // ── 3. SonarQube Analysis ─────────────────────────────────────
         stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('SonarQube') {
-                    sh """
-                        sonar-scanner \
-                            -Dsonar.projectKey=${SONAR_PROJECT} \
-                            -Dsonar.projectName="ACEest Fitness and Gym" \
-                            -Dsonar.sources=backend \
-                            -Dsonar.exclusions=backend/tests/**,backend/utils/pdf.py \
-                            -Dsonar.python.coverage.reportPaths=backend/coverage.xml \
-                            -Dsonar.python.version=3.11 \
-                            -Dsonar.host.url=http://sonarqube:9000
-                    """
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            sonar-scanner \
+                                -Dsonar.projectKey=${SONAR_PROJECT} \
+                                -Dsonar.projectName="ACEest Fitness and Gym" \
+                                -Dsonar.sources=backend \
+                                -Dsonar.exclusions=backend/tests/**,backend/utils/pdf.py \
+                                -Dsonar.python.coverage.reportPaths=backend/coverage.xml \
+                                -Dsonar.python.version=3.11 \
+                                -Dsonar.host.url=http://sonarqube:9000 \
+                                -Dsonar.token=$SONAR_TOKEN
+                        """
+                    }
                 }
             }
         }
