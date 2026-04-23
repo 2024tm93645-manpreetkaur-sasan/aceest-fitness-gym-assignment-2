@@ -163,7 +163,7 @@ pipeline {
         }
         always {
             sh "docker rm -f aceest-backend aceest-frontend || true"
-            sh "docker network disconnect aceest-net $(hostname) || true"
+            sh "docker network disconnect aceest-net \$(hostname) || true"
             sh "docker network rm aceest-net || true"
             sh "docker logout || true"
         }
