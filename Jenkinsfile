@@ -83,40 +83,39 @@ pipeline {
                 sh '''
                     # Stop any existing containers
                     docker rm -f aceest-backend aceest-frontend || true
+                    docker network rm aceest-net || true
+                    docker network create aceest-net
 
-                    # Run backend
+                    # Run backend on shared network
                     docker run -d --name aceest-backend \
-                        -p 5005:5005 \
+                        --network aceest-net \
                         -e JWT_SECRET_KEY=aceest-test-secret \
                         -e DB_NAME=/tmp/aceest.db \
                         ${BACKEND_IMAGE}:${TAG}
 
-                    # Run frontend
+                    # Run frontend on same network
                     docker run -d --name aceest-frontend \
-                        -p 3000:80 \
-                        --link aceest-backend:backend \
+                        --network aceest-net \
                         ${FRONTEND_IMAGE}:${TAG}
 
                     # Wait for containers to start
                     sleep 15
 
-                    # Use container IP directly (Jenkins runs inside Docker
-                    # so localhost does not reach host-mapped ports)
-                    BACKEND_IP=$(docker inspect -f \
-                        '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-                        aceest-backend)
-                    echo "Backend IP: $BACKEND_IP"
-
-                    # Print logs before curl to debug startup issues
+                    # Print logs to confirm startup
                     echo "=== Backend container logs ==="
                     docker logs aceest-backend
                     echo "=============================="
 
-                    curl --fail http://${BACKEND_IP}:5005/health
+                    # Connect Jenkins container to aceest-net so it can reach backend
+                    JENKINS_CONTAINER=$(hostname)
+                    docker network connect aceest-net $JENKINS_CONTAINER || true
+
+                    # Hit backend by container name (DNS resolves on shared network)
+                    curl --fail http://aceest-backend:5005/health
                     echo "Containers are up"
 
-                    # Save IP for acceptance tests
-                    echo $BACKEND_IP > /tmp/backend_ip.txt
+                    # Save backend hostname for acceptance tests
+                    echo "aceest-backend" > /tmp/backend_host.txt
                 '''
             }
         }
@@ -128,10 +127,10 @@ pipeline {
                     pip install -r acceptance-tests/requirements.txt \
                         --break-system-packages -q
 
-                    BACKEND_IP=$(cat /tmp/backend_ip.txt)
-                    echo "Running acceptance tests against http://${BACKEND_IP}:5005"
+                    BACKEND_HOST=$(cat /tmp/backend_host.txt)
+                    echo "Running acceptance tests against http://${BACKEND_HOST}:5005"
 
-                    APP_URL=http://${BACKEND_IP}:5005 \
+                    APP_URL=http://${BACKEND_HOST}:5005 \
                     ADMIN_USERNAME=admin \
                     ADMIN_PASSWORD=admin123 \
                     python3 -m pytest acceptance-tests/ -v \
@@ -164,6 +163,7 @@ pipeline {
         }
         always {
             sh "docker rm -f aceest-backend aceest-frontend || true"
+            sh "docker network rm aceest-net || true"
             sh "docker logout || true"
         }
     }
