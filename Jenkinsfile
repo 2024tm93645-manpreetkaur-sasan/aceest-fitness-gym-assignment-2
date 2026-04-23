@@ -7,6 +7,7 @@ pipeline {
         BACKEND_IMAGE   = "${DOCKERHUB_USER}/aceest-fitness-gym-api"
         FRONTEND_IMAGE  = "${DOCKERHUB_USER}/aceest-fitness-gym-ui"
         TAG             = "${env.BUILD_NUMBER}"
+        BACKEND_PORT    = '5005'
     }
 
     stages {
@@ -80,62 +81,63 @@ pipeline {
         // ── 5. Deploy Containers ──────────────────────────────────────
         stage('Deploy Containers') {
             steps {
-                sh '''
-                    # Stop any existing containers
-                    docker rm -f aceest-backend aceest-frontend || true
-                    docker network rm aceest-net || true
-                    docker network create aceest-net
+                withCredentials([
+                    string(credentialsId: 'jwt-secret', variable: 'JWT_SECRET_KEY')
+                ]) {
+                    sh '''
+                        docker rm -f aceest-backend aceest-frontend || true
+                        docker network rm aceest-net || true
+                        docker network create aceest-net
 
-                    # Run backend on shared network
-                    docker run -d --name aceest-backend \
-                        --network aceest-net \
-                        -e JWT_SECRET_KEY=aceest-test-secret \
-                        -e DB_NAME=/tmp/aceest.db \
-                        ${BACKEND_IMAGE}:${TAG}
+                        docker run -d --name aceest-backend \
+                            --network aceest-net \
+                            -e JWT_SECRET_KEY=$JWT_SECRET_KEY \
+                            -e DB_NAME=/tmp/aceest.db \
+                            ${BACKEND_IMAGE}:${TAG}
 
-                    # Run frontend on same network
-                    docker run -d --name aceest-frontend \
-                        --network aceest-net \
-                        ${FRONTEND_IMAGE}:${TAG}
+                        docker run -d --name aceest-frontend \
+                            --network aceest-net \
+                            ${FRONTEND_IMAGE}:${TAG}
 
-                    # Wait for containers to start
-                    sleep 15
+                        sleep 15
 
-                    # Print logs to confirm startup
-                    echo "=== Backend container logs ==="
-                    docker logs aceest-backend
-                    echo "=============================="
+                        echo "=== Backend container logs ==="
+                        docker logs aceest-backend
+                        echo "=============================="
 
-                    # Connect Jenkins container to aceest-net so it can reach backend
-                    JENKINS_CONTAINER=$(hostname)
-                    docker network connect aceest-net $JENKINS_CONTAINER || true
+                        JENKINS_CONTAINER=$(hostname)
+                        docker network connect aceest-net $JENKINS_CONTAINER || true
 
-                    # Hit backend by container name (DNS resolves on shared network)
-                    curl --fail http://aceest-backend:5005/health
-                    echo "Containers are up"
+                        curl --fail http://aceest-backend:${BACKEND_PORT}/health
+                        echo "Containers are up"
 
-                    # Save backend hostname for acceptance tests
-                    echo "aceest-backend" > /tmp/backend_host.txt
-                '''
+                        echo "aceest-backend" > /tmp/backend_host.txt
+                    '''
+                }
             }
         }
 
         // ── 6. Acceptance Tests ───────────────────────────────────────
         stage('Acceptance Tests') {
             steps {
-                sh '''
-                    pip install -r acceptance-tests/requirements.txt \
-                        --break-system-packages -q
+                withCredentials([
+                    string(credentialsId: 'app-admin-username', variable: 'ADMIN_USERNAME'),
+                    string(credentialsId: 'app-admin-password', variable: 'ADMIN_PASSWORD')
+                ]) {
+                    sh '''
+                        pip install -r acceptance-tests/requirements.txt \
+                            --break-system-packages -q
 
-                    BACKEND_HOST=$(cat /tmp/backend_host.txt)
-                    echo "Running acceptance tests against http://${BACKEND_HOST}:5005"
+                        BACKEND_HOST=$(cat /tmp/backend_host.txt)
+                        echo "Running acceptance tests against http://${BACKEND_HOST}:${BACKEND_PORT}"
 
-                    APP_URL=http://${BACKEND_HOST}:5005 \
-                    ADMIN_USERNAME=admin \
-                    ADMIN_PASSWORD=admin123 \
-                    python3 -m pytest acceptance-tests/ -v \
-                        --junitxml=acceptance-test-results.xml
-                '''
+                        APP_URL=http://${BACKEND_HOST}:${BACKEND_PORT} \
+                        ADMIN_USERNAME=$ADMIN_USERNAME \
+                        ADMIN_PASSWORD=$ADMIN_PASSWORD \
+                        python3 -m pytest acceptance-tests/ -v \
+                            --junitxml=acceptance-test-results.xml
+                    '''
+                }
             }
             post {
                 always {
