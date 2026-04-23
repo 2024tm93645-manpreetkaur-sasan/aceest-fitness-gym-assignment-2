@@ -25,7 +25,7 @@ pipeline {
                 dir('backend') {
                     sh '''
                         pip install -r requirements.txt --break-system-packages -q
-                        pytest tests/ -v \
+                        python3 -m pytest tests/ -v \
                             --junitxml=test-results.xml
                     '''
                 }
@@ -114,7 +114,7 @@ pipeline {
                     APP_URL=http://localhost:5005 \
                     ADMIN_USERNAME=admin \
                     ADMIN_PASSWORD=admin123 \
-                    pytest acceptance-tests/ -v \
+                    python3 -m pytest acceptance-tests/ -v \
                         --junitxml=acceptance-test-results.xml
                 '''
             }
