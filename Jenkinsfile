@@ -8,6 +8,7 @@ pipeline {
         FRONTEND_IMAGE  = "${DOCKERHUB_USER}/aceest-fitness-gym-ui"
         TAG             = "${env.BUILD_NUMBER}"
         BACKEND_PORT    = '5005'
+        SONAR_PROJECT   = 'aceest-fitness-gym'
     }
 
     stages {
@@ -27,7 +28,10 @@ pipeline {
                     sh '''
                         pip install -r requirements.txt --break-system-packages -q
                         python3 -m pytest tests/ -v \
-                            --junitxml=test-results.xml
+                            --junitxml=test-results.xml \
+                            --cov=. \
+                            --cov-omit=tests/*,utils/pdf.py \
+                            --cov-report=xml:coverage.xml
                     '''
                 }
             }
@@ -39,7 +43,34 @@ pipeline {
             }
         }
 
-        // ── 3. Docker Build ───────────────────────────────────────────
+        // ── 3. SonarQube Analysis ─────────────────────────────────────
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    sh """
+                        sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT} \
+                            -Dsonar.projectName="ACEest Fitness and Gym" \
+                            -Dsonar.sources=backend \
+                            -Dsonar.exclusions=backend/tests/**,backend/utils/pdf.py \
+                            -Dsonar.python.coverage.reportPaths=backend/coverage.xml \
+                            -Dsonar.python.version=3.11 \
+                            -Dsonar.host.url=http://sonarqube:9000
+                    """
+                }
+            }
+        }
+
+        // ── 4. Quality Gate ───────────────────────────────────────────
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ── 5. Docker Build ───────────────────────────────────────────
         stage('Docker Build') {
             parallel {
 
@@ -59,7 +90,7 @@ pipeline {
             }
         }
 
-        // ── 4. Push to Docker Hub ─────────────────────────────────────
+        // ── 6. Push to Docker Hub ─────────────────────────────────────
         stage('Push to Docker Hub') {
             steps {
                 withCredentials([usernamePassword(
@@ -78,7 +109,7 @@ pipeline {
             }
         }
 
-        // ── 5. Deploy Containers ──────────────────────────────────────
+        // ── 7. Deploy Containers ──────────────────────────────────────
         stage('Deploy Containers') {
             steps {
                 withCredentials([
@@ -117,7 +148,7 @@ pipeline {
             }
         }
 
-        // ── 6. Acceptance Tests ───────────────────────────────────────
+        // ── 8. Acceptance Tests ───────────────────────────────────────
         stage('Acceptance Tests') {
             steps {
                 withCredentials([
