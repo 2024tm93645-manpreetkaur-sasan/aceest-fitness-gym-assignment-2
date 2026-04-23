@@ -106,6 +106,12 @@ pipeline {
                         '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
                         aceest-backend)
                     echo "Backend IP: $BACKEND_IP"
+
+                    # Print logs before curl to debug startup issues
+                    echo "=== Backend container logs ==="
+                    docker logs aceest-backend
+                    echo "=============================="
+
                     curl --fail http://${BACKEND_IP}:5005/health
                     echo "Containers are up"
 
