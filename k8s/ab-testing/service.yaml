@@ -1,0 +1,37 @@
+# Conclude: kubectl delete deployment aceest-backend-version-b (if B loses)
+#           kubectl delete deployment aceest-backend-version-a (if B wins, rename)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-backend-version-a-svc
+  annotations:
+    user-segment: "control — existing users"
+spec:
+  selector:
+    app: aceest
+    tier: backend
+    variant: version-a
+  ports:
+  - port: 5005
+    targetPort: 5005
+    nodePort: 30010
+  type: NodePort
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-backend-version-b-svc
+  annotations:
+    user-segment: "variant — beta users"
+spec:
+  selector:
+    app: aceest
+    tier: backend
+    variant: version-b
+  ports:
+  - port: 5005
+    targetPort: 5005
+    nodePort: 30011
+  type: NodePort

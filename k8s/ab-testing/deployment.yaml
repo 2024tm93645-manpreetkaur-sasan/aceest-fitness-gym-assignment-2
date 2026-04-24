@@ -1,0 +1,74 @@
+# A/B Testing — two versions serve distinct user segments
+# Unlike canary (random % split), A/B is a deliberate experiment
+# Group A = control (existing users), Group B = variant (beta users)
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-backend-version-a
+  annotations:
+    user-segment: control
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest
+      tier: backend
+      variant: version-a
+  template:
+    metadata:
+      labels:
+        app: aceest
+        tier: backend
+        variant: version-a
+    spec:
+      containers:
+      - name: aceest-backend
+        image: sasanmanpreet91/aceest-fitness-gym-api:18
+        ports:
+        - containerPort: 5005
+        env:
+        - name: AB_VARIANT
+          value: "A"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5005
+          initialDelaySeconds: 10
+          periodSeconds: 5
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-backend-version-b
+  annotations:
+    user-segment: variant
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest
+      tier: backend
+      variant: version-b
+  template:
+    metadata:
+      labels:
+        app: aceest
+        tier: backend
+        variant: version-b
+    spec:
+      containers:
+      - name: aceest-backend
+        image: sasanmanpreet91/aceest-fitness-gym-api:21
+        ports:
+        - containerPort: 5005
+        env:
+        - name: AB_VARIANT
+          value: "B"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5005
+          initialDelaySeconds: 10
+          periodSeconds: 5

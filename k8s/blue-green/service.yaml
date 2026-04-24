@@ -1,0 +1,16 @@
+# Switch to green: kubectl patch svc aceest-backend-bg-svc -p '{"spec":{"selector":{"slot":"green"}}}'
+# Rollback:        kubectl patch svc aceest-backend-bg-svc -p '{"spec":{"selector":{"slot":"blue"}}}'
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-backend-bg-svc
+spec:
+  selector:
+    app: aceest
+    tier: backend
+    slot: blue
+  ports:
+  - port: 5005
+    targetPort: 5005
+    nodePort: 30006
+  type: NodePort
