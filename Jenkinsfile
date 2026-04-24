@@ -185,6 +185,8 @@ pipeline {
             when {
                 anyOf {
                     branch 'main'
+               // NOTE: feature/k8s-manifests included for testing purposes only
+               // Remove before final production deployment
                     expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
                 }
             }
