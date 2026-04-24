@@ -179,6 +179,32 @@ pipeline {
                 }
             }
         }
+
+        // ── 9. Deploy to Minikube ─────────────────────────────────────
+        stage('Deploy to Minikube') {
+            when {
+                branch 'main'
+            }
+            steps {
+                sh """
+                    kubectl config use-context minikube
+
+                    # Apply secret
+                    kubectl apply -f k8s/rolling-update/secret.yaml
+
+                    # Deploy with current build tag
+                    sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
+                        k8s/rolling-update/deployment.yaml | kubectl apply -f -
+                    kubectl apply -f k8s/rolling-update/service.yaml
+
+                    # Wait for rollout
+                    kubectl rollout status deployment/aceest-backend  --timeout=120s
+                    kubectl rollout status deployment/aceest-frontend --timeout=120s
+
+                    echo "Deployed to Minikube — TAG=${TAG}"
+                """
+            }
+        }
     }
 
     // ── Post Actions ──────────────────────────────────────────────────
@@ -194,7 +220,13 @@ pipeline {
             """
         }
         failure {
-            echo "PIPELINE FAILED — check logs above"
+            echo "PIPELINE FAILED — initiating rollback..."
+            sh """
+                kubectl config use-context minikube 2>/dev/null || true
+                kubectl rollout undo deployment/aceest-backend  2>/dev/null || true
+                kubectl rollout undo deployment/aceest-frontend 2>/dev/null || true
+                echo "Rollback complete"
+            """
         }
         always {
             sh "docker rm -f aceest-backend aceest-frontend || true"
