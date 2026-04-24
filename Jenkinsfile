@@ -192,10 +192,19 @@ pipeline {
                 sh """
                     kubectl config use-context minikube
 
-                    # DEMO: Deploy bad image to trigger auto-rollback
-                    kubectl set image deployment/aceest-backend \
-                        aceest-backend=sasanmanpreet91/aceest-fitness-gym-api:bad-image-does-not-exist
-                    kubectl rollout status deployment/aceest-backend --timeout=60s
+                    # Apply secret
+                    kubectl apply -f k8s/rolling-update/secret.yaml
+
+                    # Deploy with current build tag
+                    sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
+                        k8s/rolling-update/deployment.yaml | kubectl apply -f -
+                    kubectl apply -f k8s/rolling-update/service.yaml
+
+                    # Wait for rollout
+                    kubectl rollout status deployment/aceest-backend  --timeout=120s
+                    kubectl rollout status deployment/aceest-frontend --timeout=120s
+
+                    echo "Deployed to Minikube — TAG=${TAG}"
                 """
             }
         }
