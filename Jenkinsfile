@@ -183,7 +183,10 @@ pipeline {
         // ── 9. Deploy to Minikube ─────────────────────────────────────
         stage('Deploy to Minikube') {
             when {
-                branch 'main'
+                anyOf {
+                    branch 'main'
+                    branch 'feature/k8s-manifests'
+                }
             }
             steps {
                 sh """
