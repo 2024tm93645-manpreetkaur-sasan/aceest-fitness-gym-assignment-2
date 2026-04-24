@@ -12,7 +12,18 @@ RUN apt-get update -y && \
         unzip && \
     apt-get clean
 
-# Install sonar-scanner CLI (aarch64/ARM64 for Apple Silicon)
+# Install kubectl
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "aarch64" ]; then \
+        KUBECTL_ARCH="arm64"; \
+    else \
+        KUBECTL_ARCH="amd64"; \
+    fi && \
+    curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/${KUBECTL_ARCH}/kubectl" \
+        -o /usr/local/bin/kubectl && \
+    chmod +x /usr/local/bin/kubectl
+
+# Install sonar-scanner CLI
 RUN ARCH=$(uname -m) && \
     if [ "$ARCH" = "aarch64" ]; then \
         SONAR_ZIP="sonar-scanner-cli-6.2.1.4610-linux-aarch64.zip"; \
