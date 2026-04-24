@@ -185,7 +185,7 @@ pipeline {
             when {
                 anyOf {
                     branch 'main'
-                    branch 'feature/k8s-manifests'
+                    expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
                 }
             }
             steps {
