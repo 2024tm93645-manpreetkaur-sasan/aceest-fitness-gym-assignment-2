@@ -1,292 +1,242 @@
 pipeline {
 
-    agent any
+agent any
 
-    parameters {
-        choice(
-            name: 'STRATEGY',
-            choices: ['rolling-update', 'blue-green', 'canary', 'shadow', 'ab-testing'],
-            description: 'Select Kubernetes deployment strategy'
-        )
+parameters {
+    choice(
+        name: 'STRATEGY',
+        choices: ['rolling-update', 'blue-green', 'canary', 'shadow', 'ab-testing'],
+        description: 'Select Kubernetes deployment strategy'
+    )
+}
+
+environment {
+    DOCKERHUB_USER  = 'sasanmanpreet91'
+    BACKEND_IMAGE   = "${DOCKERHUB_USER}/aceest-fitness-gym-api"
+    FRONTEND_IMAGE  = "${DOCKERHUB_USER}/aceest-fitness-gym-ui"
+    TAG             = "${env.BUILD_NUMBER}"
+    BACKEND_PORT    = '5005'
+    SONAR_PROJECT   = 'aceest-fitness-gym'
+}
+
+stages {
+
+    stage('Checkout') {
+        steps {
+            checkout scm
+            echo "Branch: ${env.GIT_BRANCH} | Build: #${env.BUILD_NUMBER} | Strategy: ${params.STRATEGY}"
+        }
     }
 
-    environment {
-        DOCKERHUB_USER  = 'sasanmanpreet91'
-        BACKEND_IMAGE   = "${DOCKERHUB_USER}/aceest-fitness-gym-api"
-        FRONTEND_IMAGE  = "${DOCKERHUB_USER}/aceest-fitness-gym-ui"
-        TAG             = "${env.BUILD_NUMBER}"
-        BACKEND_PORT    = '5005'
-        SONAR_PROJECT   = 'aceest-fitness-gym'
+    stage('Unit Tests') {
+        steps {
+            dir('backend') {
+                sh '''
+                    pip install -r requirements.txt pytest-cov coverage --break-system-packages -q
+                    python3 -m pytest tests/ -v \
+                        --junitxml=test-results.xml \
+                        --cov=. \
+                        --cov-report=xml:coverage.xml
+                '''
+            }
+        }
+        post {
+            always {
+                junit allowEmptyResults: true,
+                      testResults: 'backend/test-results.xml'
+            }
+        }
     }
 
-    stages {
-
-        // ── 1. Checkout ───────────────────────────────────────────────
-        stage('Checkout') {
-            steps {
-                checkout scm
-                echo "Branch: ${env.GIT_BRANCH} | Build: #${env.BUILD_NUMBER} | Strategy: ${params.STRATEGY}"
-            }
-        }
-
-        // ── 2. Unit Tests ─────────────────────────────────────────────
-        stage('Unit Tests') {
-            steps {
-                dir('backend') {
-                    sh '''
-                        pip install -r requirements.txt pytest-cov coverage --break-system-packages -q
-                        python3 -m pytest tests/ -v \
-                            --junitxml=test-results.xml \
-                            --cov=. \
-                            --cov-report=xml:coverage.xml
-                    '''
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true,
-                          testResults: 'backend/test-results.xml'
+    stage('SonarQube Analysis') {
+        steps {
+            withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                withSonarQubeEnv('SonarQube') {
+                    sh """
+                        sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT} \
+                            -Dsonar.projectName="ACEest Fitness and Gym" \
+                            -Dsonar.sources=backend \
+                            -Dsonar.exclusions=backend/tests/**,backend/utils/pdf.py \
+                            -Dsonar.python.coverage.reportPaths=backend/coverage.xml \
+                            -Dsonar.python.version=3.11 \
+                            -Dsonar.host.url=http://sonarqube:9000 \
+                            -Dsonar.token=$SONAR_TOKEN
+                    """
                 }
             }
         }
+    }
 
-        // ── 3. SonarQube Analysis ─────────────────────────────────────
-        stage('SonarQube Analysis') {
-            steps {
-                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
-                    withSonarQubeEnv('SonarQube') {
-                        sh """
-                            sonar-scanner \
-                                -Dsonar.projectKey=${SONAR_PROJECT} \
-                                -Dsonar.projectName="ACEest Fitness and Gym" \
-                                -Dsonar.sources=backend \
-                                -Dsonar.exclusions=backend/tests/**,backend/utils/pdf.py \
-                                -Dsonar.python.coverage.reportPaths=backend/coverage.xml \
-                                -Dsonar.python.version=3.11 \
-                                -Dsonar.host.url=http://sonarqube:9000 \
-                                -Dsonar.token=$SONAR_TOKEN
-                        """
-                    }
+    stage('Quality Gate') {
+        steps {
+            timeout(time: 5, unit: 'MINUTES') {
+                waitForQualityGate abortPipeline: true
+            }
+        }
+    }
+
+    stage('Docker Build') {
+        parallel {
+            stage('[Backend] Build') {
+                steps {
+                    sh "docker build -t ${BACKEND_IMAGE}:${TAG} ./backend"
+                    sh "docker tag ${BACKEND_IMAGE}:${TAG} ${BACKEND_IMAGE}:latest"
+                }
+            }
+            stage('[Frontend] Build') {
+                steps {
+                    sh "docker build -t ${FRONTEND_IMAGE}:${TAG} ./frontend"
+                    sh "docker tag ${FRONTEND_IMAGE}:${TAG} ${FRONTEND_IMAGE}:latest"
                 }
             }
         }
+    }
 
-        // ── 4. Quality Gate ───────────────────────────────────────────
-        stage('Quality Gate') {
-            steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
+    stage('Push to Docker Hub') {
+        steps {
+            withCredentials([usernamePassword(
+                credentialsId: 'dockerhub-creds',
+                usernameVariable: 'DH_USER',
+                passwordVariable: 'DH_PASS'
+            )]) {
+                sh '''
+                    echo $DH_PASS | docker login -u $DH_USER --password-stdin
+                    docker push ${BACKEND_IMAGE}:${TAG}
+                    docker push ${BACKEND_IMAGE}:latest
+                    docker push ${FRONTEND_IMAGE}:${TAG}
+                    docker push ${FRONTEND_IMAGE}:latest
+                '''
             }
         }
+    }
 
-        // ── 5. Docker Build ───────────────────────────────────────────
-        stage('Docker Build') {
-            parallel {
-                stage('[Backend] Build') {
-                    steps {
-                        sh "docker build -t ${BACKEND_IMAGE}:${TAG} ./backend"
-                        sh "docker tag ${BACKEND_IMAGE}:${TAG} ${BACKEND_IMAGE}:latest"
-                    }
-                }
-                stage('[Frontend] Build') {
-                    steps {
-                        sh "docker build -t ${FRONTEND_IMAGE}:${TAG} ./frontend"
-                        sh "docker tag ${FRONTEND_IMAGE}:${TAG} ${FRONTEND_IMAGE}:latest"
-                    }
-                }
+    stage('Deploy Containers') {
+        steps {
+            withCredentials([
+                string(credentialsId: 'jwt-secret', variable: 'JWT_SECRET_KEY')
+            ]) {
+                sh '''
+                    docker rm -f aceest-backend aceest-frontend || true
+                    docker network rm aceest-net || true
+                    docker network create aceest-net
+
+                    docker run -d --name aceest-backend \
+                        --network aceest-net \
+                        -e JWT_SECRET_KEY=$JWT_SECRET_KEY \
+                        -e DB_NAME=/tmp/aceest.db \
+                        ${BACKEND_IMAGE}:${TAG}
+
+                    docker run -d --name aceest-frontend \
+                        --network aceest-net \
+                        ${FRONTEND_IMAGE}:${TAG}
+
+                    sleep 15
+
+                    docker logs aceest-backend
+
+                    JENKINS_CONTAINER=$(hostname)
+                    docker network connect aceest-net $JENKINS_CONTAINER || true
+
+                    curl --fail http://aceest-backend:${BACKEND_PORT}/health
+
+                    echo "aceest-backend" > /tmp/backend_host.txt
+                '''
             }
         }
+    }
 
-        // ── 6. Push to Docker Hub ─────────────────────────────────────
-        stage('Push to Docker Hub') {
-            steps {
-                withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-creds',
-                    usernameVariable: 'DH_USER',
-                    passwordVariable: 'DH_PASS'
-                )]) {
-                    sh '''
-                        echo $DH_PASS | docker login -u $DH_USER --password-stdin
-                        docker push ${BACKEND_IMAGE}:${TAG}
-                        docker push ${BACKEND_IMAGE}:latest
-                        docker push ${FRONTEND_IMAGE}:${TAG}
-                        docker push ${FRONTEND_IMAGE}:latest
-                    '''
-                }
+    stage('Acceptance Tests') {
+        steps {
+            withCredentials([
+                string(credentialsId: 'app-admin-username', variable: 'ADMIN_USERNAME'),
+                string(credentialsId: 'app-admin-password', variable: 'ADMIN_PASSWORD')
+            ]) {
+                sh '''
+                    pip install -r acceptance-tests/requirements.txt \
+                        --break-system-packages -q
+
+                    BACKEND_HOST=$(cat /tmp/backend_host.txt)
+
+                    APP_URL=http://${BACKEND_HOST}:${BACKEND_PORT} \
+                    ADMIN_USERNAME=$ADMIN_USERNAME \
+                    ADMIN_PASSWORD=$ADMIN_PASSWORD \
+                    python3 -m pytest acceptance-tests/ -v \
+                        --junitxml=acceptance-test-results.xml
+                '''
             }
         }
-
-        // ── 7. Deploy Containers ──────────────────────────────────────
-        stage('Deploy Containers') {
-            steps {
-                withCredentials([
-                    string(credentialsId: 'jwt-secret', variable: 'JWT_SECRET_KEY')
-                ]) {
-                    sh '''
-                        docker rm -f aceest-backend aceest-frontend || true
-                        docker network rm aceest-net || true
-                        docker network create aceest-net
-
-                        docker run -d --name aceest-backend \
-                            --network aceest-net \
-                            -e JWT_SECRET_KEY=$JWT_SECRET_KEY \
-                            -e DB_NAME=/tmp/aceest.db \
-                            ${BACKEND_IMAGE}:${TAG}
-
-                        docker run -d --name aceest-frontend \
-                            --network aceest-net \
-                            ${FRONTEND_IMAGE}:${TAG}
-
-                        sleep 15
-
-                        echo "=== Backend container logs ==="
-                        docker logs aceest-backend
-                        echo "=============================="
-
-                        JENKINS_CONTAINER=$(hostname)
-                        docker network connect aceest-net $JENKINS_CONTAINER || true
-
-                        curl --fail http://aceest-backend:${BACKEND_PORT}/health
-                        echo "Containers are up"
-
-                        echo "aceest-backend" > /tmp/backend_host.txt
-                    '''
-                }
+        post {
+            always {
+                junit allowEmptyResults: true,
+                      testResults: 'acceptance-test-results.xml'
             }
         }
+    }
 
-        // ── 8. Acceptance Tests ───────────────────────────────────────
-        stage('Acceptance Tests') {
-            steps {
-                withCredentials([
-                    string(credentialsId: 'app-admin-username', variable: 'ADMIN_USERNAME'),
-                    string(credentialsId: 'app-admin-password', variable: 'ADMIN_PASSWORD')
-                ]) {
-                    sh '''
-                        pip install -r acceptance-tests/requirements.txt \
-                            --break-system-packages -q
-
-                        BACKEND_HOST=$(cat /tmp/backend_host.txt)
-                        echo "Running acceptance tests against http://${BACKEND_HOST}:${BACKEND_PORT}"
-
-                        APP_URL=http://${BACKEND_HOST}:${BACKEND_PORT} \
-                        ADMIN_USERNAME=$ADMIN_USERNAME \
-                        ADMIN_PASSWORD=$ADMIN_PASSWORD \
-                        python3 -m pytest acceptance-tests/ -v \
-                            --junitxml=acceptance-test-results.xml
-                    '''
-                }
-            }
-            post {
-                always {
-                    junit allowEmptyResults: true,
-                          testResults: 'acceptance-test-results.xml'
-                }
+    stage('Deploy to Minikube') {
+        when {
+            anyOf {
+                branch 'main'
+                expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
             }
         }
-
-        // ── 9. Deploy to Minikube ─────────────────────────────────────
-        stage('Deploy to Minikube') {
-            when {
-                anyOf {
-                    branch 'main'
-                    // NOTE: feature branch kept for testing
-                    expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
-                }
-            }
-            steps {
+        steps {
+            withEnv(["STRATEGY=${params.STRATEGY}"]) {
                 sh """
-                    kubectl config use-context minikube
+                    export KUBECONFIG=/var/jenkins_home/.kube/config
 
-                    # Apply JWT secret (idempotent)
+                    kubectl config use-context minikube
+                    kubectl get nodes
+
                     kubectl apply -f k8s/rolling-update/secret.yaml
 
-                    # Apply selected strategy
-                    echo "Deploying strategy: ${params.STRATEGY}"
-                    kubectl apply -f k8s/${params.STRATEGY}/
+                    echo "Deploying strategy: \$STRATEGY"
+                    kubectl apply -f k8s/\$STRATEGY/
 
-                    # For rolling update — substitute image tag
-                    if [ "${params.STRATEGY}" = "rolling-update" ]; then
-                        sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
-                            k8s/rolling-update/deployment.yaml | kubectl apply -f -
+                    if [ "\$STRATEGY" = "rolling-update" ]; then
+                        sed "s|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; \
+                             s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g" \
+                             k8s/rolling-update/deployment.yaml | kubectl apply -f -
+
                         kubectl rollout status deployment/aceest-backend  --timeout=120s
                         kubectl rollout status deployment/aceest-frontend --timeout=120s
                     fi
 
-                    echo ""
-                    echo "=== Pods ==="
                     kubectl get pods -o wide
-
-                    echo ""
-                    echo "=== Services ==="
                     kubectl get svc
-
-                    echo ""
-                    echo "========================================================"
-                    echo " STRATEGY    : ${params.STRATEGY}"
-                    echo " BUILD       : #${TAG}"
-                    echo " ACCESS URLS (run on your Mac after pipeline completes):"
-                    echo ""
-
-                    case "${params.STRATEGY}" in
-                        rolling-update)
-                            echo "  Backend  : minikube service aceest-backend-svc --url"
-                            echo "  Frontend : minikube service aceest-frontend-svc --url"
-                            ;;
-                        blue-green)
-                            echo "  Service  : minikube service aceest-backend-bg-svc --url"
-                            echo "  Switch to green : kubectl patch svc aceest-backend-bg-svc -p '{\"spec\":{\"selector\":{\"slot\":\"green\"}}}'"
-                            echo "  Rollback to blue: kubectl patch svc aceest-backend-bg-svc -p '{\"spec\":{\"selector\":{\"slot\":\"blue\"}}}'"
-                            ;;
-                        canary)
-                            echo "  Service  : minikube service aceest-backend-canary-svc --url"
-                            echo "  Promote  : kubectl scale deployment aceest-backend-canary --replicas=10"
-                            echo "  Rollback : kubectl delete deployment aceest-backend-canary"
-                            ;;
-                        shadow)
-                            echo "  Production : minikube service aceest-backend-stable-svc --url"
-                            echo "  Shadow     : minikube service aceest-backend-shadow-svc --url"
-                            ;;
-                        ab-testing)
-                            echo "  Group A : minikube service aceest-backend-version-a-svc --url"
-                            echo "  Group B : minikube service aceest-backend-version-b-svc --url"
-                            ;;
-                    esac
-
-                    echo "========================================================"
                 """
             }
         }
     }
+}
 
-    // ── Post Actions ──────────────────────────────────────────────────
-    post {
-        success {
-            echo """
-            ========================================
-             PIPELINE SUCCESS
-             Build    : #${env.BUILD_NUMBER}
-             Strategy : ${params.STRATEGY}
-             Backend  : ${BACKEND_IMAGE}:${TAG}
-             Frontend : ${FRONTEND_IMAGE}:${TAG}
-            ========================================
-            """
-        }
-        failure {
-            echo "PIPELINE FAILED - initiating rollback..."
-            sh """
-                kubectl config use-context minikube 2>/dev/null || true
-                kubectl rollout undo deployment/aceest-backend  2>/dev/null || true
-                kubectl rollout undo deployment/aceest-frontend 2>/dev/null || true
-                echo "Rollback complete"
-            """
-        }
-        always {
-            sh "docker rm -f aceest-backend aceest-frontend || true"
-            sh "docker network disconnect aceest-net \$(hostname) || true"
-            sh "docker network rm aceest-net || true"
-            sh "docker logout || true"
-        }
+post {
+    success {
+        echo """
+        ========================================
+         PIPELINE SUCCESS
+         Build    : #${env.BUILD_NUMBER}
+         Strategy : ${params.STRATEGY}
+        ========================================
+        """
     }
+
+    failure {
+        echo "PIPELINE FAILED - initiating rollback..."
+        sh """
+            export KUBECONFIG=/var/jenkins_home/.kube/config
+            kubectl config use-context minikube 2>/dev/null || true
+            kubectl rollout undo deployment/aceest-backend  2>/dev/null || true
+            kubectl rollout undo deployment/aceest-frontend 2>/dev/null || true
+        """
+    }
+
+    always {
+        sh "docker rm -f aceest-backend aceest-frontend || true"
+        sh "docker network disconnect aceest-net \$(hostname) || true"
+        sh "docker network rm aceest-net || true"
+        sh "docker logout || true"
+    }
+ }
 }
