@@ -2,6 +2,14 @@ pipeline {
 
     agent any
 
+    parameters {
+        choice(
+            name: 'STRATEGY',
+            choices: ['rolling-update', 'blue-green', 'canary', 'shadow', 'ab-testing'],
+            description: 'Select Kubernetes deployment strategy'
+        )
+    }
+
     environment {
         DOCKERHUB_USER  = 'sasanmanpreet91'
         BACKEND_IMAGE   = "${DOCKERHUB_USER}/aceest-fitness-gym-api"
@@ -17,7 +25,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "Branch: ${env.GIT_BRANCH} | Build: #${env.BUILD_NUMBER}"
+                echo "Branch: ${env.GIT_BRANCH} | Build: #${env.BUILD_NUMBER} | Strategy: ${params.STRATEGY}"
             }
         }
 
@@ -75,14 +83,12 @@ pipeline {
         // ── 5. Docker Build ───────────────────────────────────────────
         stage('Docker Build') {
             parallel {
-
                 stage('[Backend] Build') {
                     steps {
                         sh "docker build -t ${BACKEND_IMAGE}:${TAG} ./backend"
                         sh "docker tag ${BACKEND_IMAGE}:${TAG} ${BACKEND_IMAGE}:latest"
                     }
                 }
-
                 stage('[Frontend] Build') {
                     steps {
                         sh "docker build -t ${FRONTEND_IMAGE}:${TAG} ./frontend"
@@ -185,8 +191,7 @@ pipeline {
             when {
                 anyOf {
                     branch 'main'
-               // NOTE: feature/k8s-manifests included for testing purposes only
-               // Remove before final production deployment
+                    // NOTE: feature branch kept for testing
                     expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
                 }
             }
@@ -194,19 +199,62 @@ pipeline {
                 sh """
                     kubectl config use-context minikube
 
-                    # Apply secret
+                    # Apply JWT secret (idempotent)
                     kubectl apply -f k8s/rolling-update/secret.yaml
 
-                    # Deploy with current build tag
-                    sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
-                        k8s/rolling-update/deployment.yaml | kubectl apply -f -
-                    kubectl apply -f k8s/rolling-update/service.yaml
+                    # Apply selected strategy
+                    echo "Deploying strategy: ${params.STRATEGY}"
+                    kubectl apply -f k8s/${params.STRATEGY}/
 
-                    # Wait for rollout
-                    kubectl rollout status deployment/aceest-backend  --timeout=120s
-                    kubectl rollout status deployment/aceest-frontend --timeout=120s
+                    # For rolling update — substitute image tag
+                    if [ "${params.STRATEGY}" = "rolling-update" ]; then
+                        sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
+                            k8s/rolling-update/deployment.yaml | kubectl apply -f -
+                        kubectl rollout status deployment/aceest-backend  --timeout=120s
+                        kubectl rollout status deployment/aceest-frontend --timeout=120s
+                    fi
 
-                    echo "Deployed to Minikube — TAG=${TAG}"
+                    echo ""
+                    echo "=== Pods ==="
+                    kubectl get pods -o wide
+
+                    echo ""
+                    echo "=== Services ==="
+                    kubectl get svc
+
+                    echo ""
+                    echo "========================================================"
+                    echo " STRATEGY    : ${params.STRATEGY}"
+                    echo " BUILD       : #${TAG}"
+                    echo " ACCESS URLS (run on your Mac after pipeline completes):"
+                    echo ""
+
+                    case "${params.STRATEGY}" in
+                        rolling-update)
+                            echo "  Backend  : minikube service aceest-backend-svc --url"
+                            echo "  Frontend : minikube service aceest-frontend-svc --url"
+                            ;;
+                        blue-green)
+                            echo "  Service  : minikube service aceest-backend-bg-svc --url"
+                            echo "  Switch to green : kubectl patch svc aceest-backend-bg-svc -p '{\"spec\":{\"selector\":{\"slot\":\"green\"}}}'"
+                            echo "  Rollback to blue: kubectl patch svc aceest-backend-bg-svc -p '{\"spec\":{\"selector\":{\"slot\":\"blue\"}}}'"
+                            ;;
+                        canary)
+                            echo "  Service  : minikube service aceest-backend-canary-svc --url"
+                            echo "  Promote  : kubectl scale deployment aceest-backend-canary --replicas=10"
+                            echo "  Rollback : kubectl delete deployment aceest-backend-canary"
+                            ;;
+                        shadow)
+                            echo "  Production : minikube service aceest-backend-stable-svc --url"
+                            echo "  Shadow     : minikube service aceest-backend-shadow-svc --url"
+                            ;;
+                        ab-testing)
+                            echo "  Group A : minikube service aceest-backend-version-a-svc --url"
+                            echo "  Group B : minikube service aceest-backend-version-b-svc --url"
+                            ;;
+                    esac
+
+                    echo "========================================================"
                 """
             }
         }
@@ -218,14 +266,15 @@ pipeline {
             echo """
             ========================================
              PIPELINE SUCCESS
-             Build   : #${env.BUILD_NUMBER}
-             Backend : ${BACKEND_IMAGE}:${TAG}
-             Frontend: ${FRONTEND_IMAGE}:${TAG}
+             Build    : #${env.BUILD_NUMBER}
+             Strategy : ${params.STRATEGY}
+             Backend  : ${BACKEND_IMAGE}:${TAG}
+             Frontend : ${FRONTEND_IMAGE}:${TAG}
             ========================================
             """
         }
         failure {
-            echo "PIPELINE FAILED — initiating rollback..."
+            echo "PIPELINE FAILED - initiating rollback..."
             sh """
                 kubectl config use-context minikube 2>/dev/null || true
                 kubectl rollout undo deployment/aceest-backend  2>/dev/null || true
