@@ -1,12 +1,11 @@
 # Blue-Green — two full deployments run simultaneously
-# Switch traffic instantly by patching the service selector
-# Rollback is instant — patch selector back to blue
+# Stable (Blue) = :42 Ocean Blue theme | New (Green) = :43 Forest Green theme
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: blue-green
   name: aceest-backend-blue
+  namespace: blue-green
   annotations:
     role: stable
 spec:
@@ -18,12 +17,11 @@ spec:
       slot: blue
   template:
     metadata:
-  namespace: blue-green
-  labels:
-      app: aceest
-      tier: backend
-      slot: blue
-  spec:
+      labels:
+        app: aceest
+        tier: backend
+        slot: blue
+    spec:
       imagePullSecrets:
         - name: dockerhub-secret
       containers:
@@ -37,13 +35,12 @@ spec:
               port: 5005
             initialDelaySeconds: 10
             periodSeconds: 5
-
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: blue-green
   name: aceest-backend-green
+  namespace: blue-green
   annotations:
     role: new-version
 spec:
@@ -54,13 +51,12 @@ spec:
       tier: backend
       slot: green
   template:
-   metadata:
-  namespace: blue-green
-  labels:
-      app: aceest
-      tier: backend
-      slot: green
-  spec:
+    metadata:
+      labels:
+        app: aceest
+        tier: backend
+        slot: green
+    spec:
       imagePullSecrets:
         - name: dockerhub-secret
       containers:

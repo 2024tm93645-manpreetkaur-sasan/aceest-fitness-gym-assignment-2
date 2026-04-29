@@ -1,11 +1,11 @@
-# Canary — 9 stable + 1 canary = ~10% traffic to new version
-# K8s load balances proportionally to replica count
+# Canary — 2 stable + 1 canary = ~33% traffic to new version
+# Stable = :42 Ocean Blue theme | Canary = :43 Forest Green theme
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: canary
   name: aceest-backend-stable
+  namespace: canary
   annotations:
     role: stable
 spec:
@@ -17,12 +17,11 @@ spec:
       track: stable
   template:
     metadata:
-  namespace: canary
-  labels:
-      app: aceest
-      tier: backend
-      track: stable
-  spec:
+      labels:
+        app: aceest
+        tier: backend
+        track: stable
+    spec:
       imagePullSecrets:
         - name: dockerhub-secret
       containers:
@@ -36,13 +35,12 @@ spec:
               port: 5005
             initialDelaySeconds: 10
             periodSeconds: 5
-
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: canary
   name: aceest-backend-canary
+  namespace: canary
   annotations:
     role: canary
 spec:
@@ -54,11 +52,10 @@ spec:
       track: canary
   template:
     metadata:
-    namespace: canary
-    labels:
-      app: aceest
-      tier: backend
-      track: canary
+      labels:
+        app: aceest
+        tier: backend
+        track: canary
     spec:
       imagePullSecrets:
         - name: dockerhub-secret

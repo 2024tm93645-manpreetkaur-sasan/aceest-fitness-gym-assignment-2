@@ -1,12 +1,11 @@
 # A/B Testing — two versions serve distinct user segments
-# Unlike canary (random % split), A/B is a deliberate experiment
-# Group A = control (existing users), Group B = variant (beta users)
+# Group A (control) = :42 Ocean Blue | Group B (variant) = :43 Forest Green
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: ab-testing
   name: aceest-backend-version-a
+  namespace: ab-testing
   annotations:
     user-segment: control
 spec:
@@ -18,12 +17,11 @@ spec:
       variant: version-a
   template:
     metadata:
-  namespace: ab-testing
-  labels:
-      app: aceest
-      tier: backend
-      variant: version-a
-  spec:
+      labels:
+        app: aceest
+        tier: backend
+        variant: version-a
+    spec:
       imagePullSecrets:
         - name: dockerhub-secret
       containers:
@@ -40,13 +38,12 @@ spec:
               port: 5005
             initialDelaySeconds: 10
             periodSeconds: 5
-
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  namespace: ab-testing
   name: aceest-backend-version-b
+  namespace: ab-testing
   annotations:
     user-segment: variant
 spec:
@@ -58,12 +55,11 @@ spec:
       variant: version-b
   template:
     metadata:
-  namespace: ab-testing
-  labels:
-      app: aceest
-      tier: backend
-      variant: version-b
-  spec:
+      labels:
+        app: aceest
+        tier: backend
+        variant: version-b
+    spec:
       imagePullSecrets:
         - name: dockerhub-secret
       containers:
