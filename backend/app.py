@@ -19,7 +19,7 @@ def create_app():
 
     @app.route("/")
     def index():
-        return jsonify({"app": "ACEest Fitness & Gym", "version": "2.0.1", "status": "running"}), 200
+        return jsonify({"app": "ACEest Fitness & Gym", "version": "2.0.4", "status": "running"}), 200
 
     return app
 
