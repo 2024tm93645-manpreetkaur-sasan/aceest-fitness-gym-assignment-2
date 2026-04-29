@@ -1,35 +1,33 @@
----
 apiVersion: v1
 kind: Service
 metadata:
   name: aceest-backend-stable-svc
+  namespace: shadow
   annotations:
-    note: "Live production traffic — users see this"
+    note: "Live production traffic - users see this"
 spec:
+  type: LoadBalancer
   selector:
     app: aceest
     tier: backend
     track: stable-shadow
   ports:
-  - port: 5005
+  - port: 80
     targetPort: 5005
-    nodePort: 30008
-  type: NodePort
-
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: aceest-backend-shadow-svc
+  namespace: shadow
   annotations:
-    note: "Mirrored traffic — responses discarded"
+    note: "Mirrored traffic - responses discarded"
 spec:
+  type: LoadBalancer
   selector:
     app: aceest
     tier: backend
     track: shadow
   ports:
-  - port: 5005
+  - port: 80
     targetPort: 5005
-    nodePort: 30009
-  type: NodePort

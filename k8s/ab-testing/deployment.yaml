@@ -1,13 +1,9 @@
-# A/B Testing — two versions serve distinct user segments
-# Unlike canary (random % split), A/B is a deliberate experiment
 # Group A = control (existing users), Group B = variant (beta users)
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-backend-version-a
-  annotations:
-    user-segment: control
+  namespace: ab-testing
 spec:
   replicas: 2
   selector:
@@ -22,6 +18,8 @@ spec:
         tier: backend
         variant: version-a
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
       - name: aceest-backend
         image: sasanmanpreet91/aceest-fitness-gym-api:18
@@ -36,14 +34,12 @@ spec:
             port: 5005
           initialDelaySeconds: 10
           periodSeconds: 5
-
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-backend-version-b
-  annotations:
-    user-segment: variant
+  namespace: ab-testing
 spec:
   replicas: 2
   selector:
@@ -58,6 +54,8 @@ spec:
         tier: backend
         variant: version-b
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
       - name: aceest-backend
         image: sasanmanpreet91/aceest-fitness-gym-api:21

@@ -1,17 +1,16 @@
 # Routes to BOTH stable and canary pods via shared app+tier label
-# Promote: kubectl scale deployment aceest-backend-canary --replicas=10
-#          kubectl scale deployment aceest-backend-stable --replicas=0
-# Rollback: kubectl delete deployment aceest-backend-canary
+# Promote: kubectl scale deployment aceest-backend-canary -n canary --replicas=10
+# Rollback: kubectl delete deployment aceest-backend-canary -n canary
 apiVersion: v1
 kind: Service
 metadata:
   name: aceest-backend-canary-svc
+  namespace: canary
 spec:
+  type: LoadBalancer
   selector:
     app: aceest
     tier: backend
   ports:
-  - port: 5005
+  - port: 80
     targetPort: 5005
-    nodePort: 30007
-  type: NodePort

@@ -1,12 +1,9 @@
-# Canary — 9 stable + 1 canary = ~10% traffic to new version
-# K8s load balances proportionally to replica count
----
+# 9 stable + 1 canary = ~10% traffic to new version
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-backend-stable
-  annotations:
-    role: stable
+  namespace: canary
 spec:
   replicas: 9
   selector:
@@ -21,6 +18,8 @@ spec:
         tier: backend
         track: stable
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
       - name: aceest-backend
         image: sasanmanpreet91/aceest-fitness-gym-api:18
@@ -32,14 +31,12 @@ spec:
             port: 5005
           initialDelaySeconds: 10
           periodSeconds: 5
-
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-backend-canary
-  annotations:
-    role: canary
+  namespace: canary
 spec:
   replicas: 1
   selector:
@@ -54,6 +51,8 @@ spec:
         tier: backend
         track: canary
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
       - name: aceest-backend
         image: sasanmanpreet91/aceest-fitness-gym-api:21

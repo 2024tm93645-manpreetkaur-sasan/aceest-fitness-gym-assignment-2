@@ -1,13 +1,8 @@
-# Blue-Green — two full deployments run simultaneously
-# Switch traffic instantly by patching the service selector
-# Rollback is instant — patch selector back to blue
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-backend-blue
-  annotations:
-    role: stable
+  namespace: blue-green
 spec:
   replicas: 2
   selector:
@@ -22,6 +17,8 @@ spec:
         tier: backend
         slot: blue
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
       - name: aceest-backend
         image: sasanmanpreet91/aceest-fitness-gym-api:18
@@ -33,14 +30,12 @@ spec:
             port: 5005
           initialDelaySeconds: 10
           periodSeconds: 5
-
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-backend-green
-  annotations:
-    role: new-version
+  namespace: blue-green
 spec:
   replicas: 2
   selector:
@@ -55,6 +50,8 @@ spec:
         tier: backend
         slot: green
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
       - name: aceest-backend
         image: sasanmanpreet91/aceest-fitness-gym-api:21

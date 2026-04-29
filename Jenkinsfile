@@ -186,75 +186,166 @@ pipeline {
             }
         }
 
-        // ── 9. Deploy to Minikube ─────────────────────────────────────
-        stage('Deploy to Minikube') {
+        // ── 9. GKE Auth + Setup ───────────────────────────────────────
+        stage('GKE Auth') {
             when {
                 anyOf {
                     branch 'main'
-                    // NOTE: feature branch kept for testing
+                    expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
+                }
+            }
+            steps {
+                withCredentials([file(credentialsId: 'gcp-service-account', variable: 'GCP_KEY')]) {
+                    sh """
+                        gcloud auth activate-service-account --key-file=\$GCP_KEY
+                        gcloud config set project aceest-devops
+                        gcloud container clusters get-credentials aceest-cluster \
+                            --zone asia-south1-a --project aceest-devops
+
+                        # Create all namespaces
+                        kubectl apply -f k8s-gke/rolling-update/namespace.yaml
+                        kubectl apply -f k8s-gke/blue-green/namespace.yaml
+                        kubectl apply -f k8s-gke/canary/namespace.yaml
+                        kubectl apply -f k8s-gke/shadow/namespace.yaml
+                        kubectl apply -f k8s-gke/ab-testing/namespace.yaml
+
+                        # Create Docker Hub pull secret in all namespaces
+                        for NS in rolling blue-green canary shadow ab-testing; do
+                            kubectl create secret docker-registry dockerhub-secret \
+                                --docker-username=sasanmanpreet91 \
+                                --docker-password=dckr_pat_lRmJF1jFfKuq5X88k6d9brvBRog \
+                                --docker-server=https://index.docker.io/v1/ \
+                                --namespace=\$NS \
+                                --dry-run=client -o yaml | kubectl apply -f -
+                        done
+
+                        # Create JWT secret in rolling namespace
+                        kubectl apply -f k8s-gke/rolling-update/secret.yaml
+
+                        echo "GKE setup complete"
+                        kubectl get nodes
+                    """
+                }
+            }
+        }
+
+        // ── 10. Deploy All Strategies in Parallel ─────────────────────
+        stage('Deploy All Strategies') {
+            when {
+                anyOf {
+                    branch 'main'
+                    expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
+                }
+            }
+            parallel {
+
+                stage('Rolling Update') {
+                    steps {
+                        sh """
+                            sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
+                                k8s-gke/rolling-update/deployment.yaml | kubectl apply -n rolling -f -
+                            kubectl apply -n rolling -f k8s-gke/rolling-update/service.yaml
+                            kubectl rollout status deployment/aceest-backend -n rolling --timeout=180s
+                            kubectl rollout status deployment/aceest-frontend -n rolling --timeout=180s
+                            echo "Rolling Update deployed"
+                        """
+                    }
+                }
+
+                stage('Blue-Green') {
+                    steps {
+                        sh """
+                            kubectl apply -n blue-green -f k8s-gke/blue-green/deployment.yaml
+                            kubectl apply -n blue-green -f k8s-gke/blue-green/service.yaml
+                            kubectl rollout status deployment/aceest-backend-blue -n blue-green --timeout=180s
+                            echo "Blue-Green deployed"
+                        """
+                    }
+                }
+
+                stage('Canary') {
+                    steps {
+                        sh """
+                            kubectl apply -n canary -f k8s-gke/canary/deployment.yaml
+                            kubectl apply -n canary -f k8s-gke/canary/service.yaml
+                            kubectl rollout status deployment/aceest-backend-stable -n canary --timeout=180s
+                            echo "Canary deployed"
+                        """
+                    }
+                }
+
+                stage('Shadow') {
+                    steps {
+                        sh """
+                            kubectl apply -n shadow -f k8s-gke/shadow/deployment.yaml
+                            kubectl apply -n shadow -f k8s-gke/shadow/service.yaml
+                            kubectl rollout status deployment/aceest-backend-stable-shadow -n shadow --timeout=180s
+                            echo "Shadow deployed"
+                        """
+                    }
+                }
+
+                stage('AB Testing') {
+                    steps {
+                        sh """
+                            kubectl apply -n ab-testing -f k8s-gke/ab-testing/deployment.yaml
+                            kubectl apply -n ab-testing -f k8s-gke/ab-testing/service.yaml
+                            kubectl rollout status deployment/aceest-backend-version-a -n ab-testing --timeout=180s
+                            echo "AB Testing deployed"
+                        """
+                    }
+                }
+
+            }
+        }
+
+        // ── 11. Print All Public URLs ──────────────────────────────────
+        stage('Public URLs') {
+            when {
+                anyOf {
+                    branch 'main'
                     expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
                 }
             }
             steps {
                 sh """
-                    kubectl config use-context minikube
-
-                    # Apply JWT secret (idempotent)
-                    kubectl apply -f k8s/rolling-update/secret.yaml
-
-                    # Apply selected strategy
-                    echo "Deploying strategy: ${params.STRATEGY}"
-                    kubectl apply -f k8s/${params.STRATEGY}/
-
-                    # For rolling update — substitute image tag
-                    if [ "${params.STRATEGY}" = "rolling-update" ]; then
-                        sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
-                            k8s/rolling-update/deployment.yaml | kubectl apply -f -
-                        kubectl rollout status deployment/aceest-backend  --timeout=120s
-                        kubectl rollout status deployment/aceest-frontend --timeout=120s
-                    fi
+                    echo "Waiting 60s for LoadBalancer IPs to be assigned..."
+                    sleep 60
 
                     echo ""
-                    echo "=== Pods ==="
-                    kubectl get pods -o wide
+                    echo "================================================================"
+                    echo " ALL STRATEGIES DEPLOYED - ACEest Fitness & Gym on GKE"
+                    echo " Build #${TAG} | Cluster: aceest-cluster (asia-south1-a)"
+                    echo "================================================================"
 
                     echo ""
-                    echo "=== Services ==="
-                    kubectl get svc
+                    echo "--- Rolling Update (namespace: rolling) ---"
+                    kubectl get svc -n rolling
 
                     echo ""
-                    echo "========================================================"
-                    echo " STRATEGY    : ${params.STRATEGY}"
-                    echo " BUILD       : #${TAG}"
-                    echo " ACCESS URLS (run on your Mac after pipeline completes):"
+                    echo "--- Blue-Green (namespace: blue-green) ---"
+                    kubectl get svc -n blue-green
+
                     echo ""
+                    echo "--- Canary (namespace: canary) ---"
+                    kubectl get svc -n canary
 
-                    case "${params.STRATEGY}" in
-                        rolling-update)
-                            echo "  Backend  : minikube service aceest-backend-svc --url"
-                            echo "  Frontend : minikube service aceest-frontend-svc --url"
-                            ;;
-                        blue-green)
-                            echo "  Service  : minikube service aceest-backend-bg-svc --url"
-                            echo "  Switch to green : kubectl patch svc aceest-backend-bg-svc -p '{\"spec\":{\"selector\":{\"slot\":\"green\"}}}'"
-                            echo "  Rollback to blue: kubectl patch svc aceest-backend-bg-svc -p '{\"spec\":{\"selector\":{\"slot\":\"blue\"}}}'"
-                            ;;
-                        canary)
-                            echo "  Service  : minikube service aceest-backend-canary-svc --url"
-                            echo "  Promote  : kubectl scale deployment aceest-backend-canary --replicas=10"
-                            echo "  Rollback : kubectl delete deployment aceest-backend-canary"
-                            ;;
-                        shadow)
-                            echo "  Production : minikube service aceest-backend-stable-svc --url"
-                            echo "  Shadow     : minikube service aceest-backend-shadow-svc --url"
-                            ;;
-                        ab-testing)
-                            echo "  Group A : minikube service aceest-backend-version-a-svc --url"
-                            echo "  Group B : minikube service aceest-backend-version-b-svc --url"
-                            ;;
-                    esac
+                    echo ""
+                    echo "--- Shadow (namespace: shadow) ---"
+                    kubectl get svc -n shadow
 
-                    echo "========================================================"
+                    echo ""
+                    echo "--- AB Testing (namespace: ab-testing) ---"
+                    kubectl get svc -n ab-testing
+
+                    echo ""
+                    echo "================================================================"
+                    echo " NOTES:"
+                    echo " - All services use LoadBalancer type"
+                    echo " - Access each URL at http://<EXTERNAL-IP>/health"
+                    echo " - Blue-Green: patch svc selector to switch blue/green"
+                    echo " - Canary: scale canary replicas to promote"
+                    echo "================================================================"
                 """
             }
         }
@@ -270,15 +361,17 @@ pipeline {
              Strategy : ${params.STRATEGY}
              Backend  : ${BACKEND_IMAGE}:${TAG}
              Frontend : ${FRONTEND_IMAGE}:${TAG}
+             Cluster  : aceest-cluster (GKE)
             ========================================
             """
         }
         failure {
-            echo "PIPELINE FAILED - initiating rollback..."
+            echo "PIPELINE FAILED - initiating rollback on rolling-update namespace..."
             sh """
-                kubectl config use-context minikube 2>/dev/null || true
-                kubectl rollout undo deployment/aceest-backend  2>/dev/null || true
-                kubectl rollout undo deployment/aceest-frontend 2>/dev/null || true
+                gcloud container clusters get-credentials aceest-cluster \
+                    --zone asia-south1-a --project aceest-devops 2>/dev/null || true
+                kubectl rollout undo deployment/aceest-backend  -n rolling 2>/dev/null || true
+                kubectl rollout undo deployment/aceest-frontend -n rolling 2>/dev/null || true
                 echo "Rollback complete"
             """
         }

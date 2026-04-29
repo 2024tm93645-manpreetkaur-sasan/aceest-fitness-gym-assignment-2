@@ -1,14 +1,8 @@
-# Rolling Update — zero downtime deployment
-# maxUnavailable=0 ensures a new pod is Ready
-# before the old one is terminated
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-backend
-  labels:
-    app: aceest
-    tier: backend
+  namespace: rolling
 spec:
   replicas: 2
   selector:
@@ -26,40 +20,33 @@ spec:
         app: aceest
         tier: backend
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
-        - name: aceest-backend
-          image: sasanmanpreet91/aceest-fitness-gym-api:latest
-          ports:
-            - containerPort: 5005
-          env:
-            - name: JWT_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: aceest-secrets
-                  key: jwt-secret
-            - name: DB_NAME
-              value: "/data/aceest_fitness.db"
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 5005
-            initialDelaySeconds: 10
-            periodSeconds: 5
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 5005
-            initialDelaySeconds: 20
-            periodSeconds: 10
-
+      - name: aceest-backend
+        image: sasanmanpreet91/aceest-fitness-gym-api:latest
+        ports:
+        - containerPort: 5005
+        env:
+        - name: JWT_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aceest-secrets
+              key: jwt-secret
+        - name: DB_NAME
+          value: "/data/aceest_fitness.db"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5005
+          initialDelaySeconds: 10
+          periodSeconds: 5
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: aceest-frontend
-  labels:
-    app: aceest
-    tier: frontend
+  namespace: rolling
 spec:
   replicas: 2
   selector:
@@ -77,17 +64,19 @@ spec:
         app: aceest
         tier: frontend
     spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
       containers:
-        - name: aceest-frontend
-          image: sasanmanpreet91/aceest-fitness-gym-ui:latest
-          ports:
-            - containerPort: 80
-          env:
-            - name: BACKEND_HOST
-              value: "aceest-backend-svc"
-          readinessProbe:
-            httpGet:
-              path: /
-              port: 80
-            initialDelaySeconds: 10
-            periodSeconds: 5
+      - name: aceest-frontend
+        image: sasanmanpreet91/aceest-fitness-gym-ui:latest
+        ports:
+        - containerPort: 80
+        env:
+        - name: BACKEND_HOST
+          value: "aceest-backend-svc"
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5

@@ -1,16 +1,17 @@
-# Switch to green: kubectl patch svc aceest-backend-bg-svc -p '{"spec":{"selector":{"slot":"green"}}}'
-# Rollback:        kubectl patch svc aceest-backend-bg-svc -p '{"spec":{"selector":{"slot":"blue"}}}'
+# Currently routing to blue (stable)
+# Switch to green: kubectl patch svc aceest-backend-bg-svc -n blue-green -p '{"spec":{"selector":{"slot":"green"}}}'
+# Rollback to blue: kubectl patch svc aceest-backend-bg-svc -n blue-green -p '{"spec":{"selector":{"slot":"blue"}}}'
 apiVersion: v1
 kind: Service
 metadata:
   name: aceest-backend-bg-svc
+  namespace: blue-green
 spec:
+  type: LoadBalancer
   selector:
     app: aceest
     tier: backend
     slot: blue
   ports:
-  - port: 5005
+  - port: 80
     targetPort: 5005
-    nodePort: 30006
-  type: NodePort
