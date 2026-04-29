@@ -195,7 +195,10 @@ pipeline {
                 }
             }
             steps {
-                withCredentials([file(credentialsId: 'gcp-service-account', variable: 'GCP_KEY')]) {
+                withCredentials([
+                    file(credentialsId: 'gcp-service-account', variable: 'GCP_KEY'),
+                    usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')
+                ]) {
                     sh """
                         gcloud auth activate-service-account --key-file=\$GCP_KEY
                         gcloud config set project aceest-devops
@@ -213,7 +216,7 @@ pipeline {
                         for NS in rolling blue-green canary shadow ab-testing; do
                             kubectl create secret docker-registry dockerhub-secret \
                                 --docker-username=sasanmanpreet91 \
-                                --docker-password=dckr_pat_lRmJF1jFfKuq5X88k6d9brvBRog \
+                                --docker-password=$DH_PASS \
                                 --docker-server=https://index.docker.io/v1/ \
                                 --namespace=\$NS \
                                 --dry-run=client -o yaml | kubectl apply -f -
