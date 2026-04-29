@@ -9,7 +9,7 @@ metadata:
   annotations:
     role: stable
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: aceest
@@ -44,7 +44,7 @@ metadata:
   annotations:
     role: new-version
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: aceest

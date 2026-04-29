@@ -2,14 +2,6 @@ pipeline {
 
     agent any
 
-    parameters {
-        choice(
-            name: 'STRATEGY',
-            choices: ['rolling-update', 'blue-green', 'canary', 'shadow', 'ab-testing'],
-            description: 'Select Kubernetes deployment strategy'
-        )
-    }
-
     environment {
         DOCKERHUB_USER  = 'sasanmanpreet91'
         BACKEND_IMAGE   = "${DOCKERHUB_USER}/aceest-fitness-gym-api"
@@ -25,7 +17,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 checkout scm
-                echo "Branch: ${env.GIT_BRANCH} | Build: #${env.BUILD_NUMBER} | Strategy: ${params.STRATEGY}"
+                echo "Branch: ${env.GIT_BRANCH} | Build: #${env.BUILD_NUMBER}"
             }
         }
 
@@ -299,6 +291,7 @@ pipeline {
                 stage('Blue-Green') {
                     steps {
                         sh """
+                            kubectl delete deployment aceest-backend-blue aceest-backend-green -n blue-green 2>/dev/null || true
                             kubectl apply -n blue-green -f k8s/blue-green/deployment.yaml
                             kubectl apply -n blue-green -f k8s/blue-green/service.yaml
                             kubectl rollout status deployment/aceest-backend-blue -n blue-green --timeout=300s
@@ -310,6 +303,7 @@ pipeline {
                 stage('Canary') {
                     steps {
                         sh """
+                            kubectl delete deployment aceest-backend-stable aceest-backend-canary -n canary 2>/dev/null || true
                             kubectl apply -n canary -f k8s/canary/deployment.yaml
                             kubectl apply -n canary -f k8s/canary/service.yaml
                             kubectl rollout status deployment/aceest-backend-stable -n canary --timeout=300s
@@ -321,6 +315,7 @@ pipeline {
                 stage('Shadow') {
                     steps {
                         sh """
+                            kubectl delete deployment aceest-backend-stable-shadow aceest-backend-shadow -n shadow 2>/dev/null || true
                             kubectl apply -n shadow -f k8s/shadow/deployment.yaml
                             kubectl apply -n shadow -f k8s/shadow/service.yaml
                             kubectl rollout status deployment/aceest-backend-stable-shadow -n shadow --timeout=300s
@@ -332,6 +327,7 @@ pipeline {
                 stage('AB Testing') {
                     steps {
                         sh """
+                            kubectl delete deployment aceest-backend-version-a aceest-backend-version-b -n ab-testing 2>/dev/null || true
                             kubectl apply -n ab-testing -f k8s/ab-testing/deployment.yaml
                             kubectl apply -n ab-testing -f k8s/ab-testing/service.yaml
                             kubectl rollout status deployment/aceest-backend-version-a -n ab-testing --timeout=300s
@@ -368,27 +364,35 @@ pipeline {
 
                     echo ""
                     echo "--- Blue-Green (namespace: blue-green) ---"
-                    kubectl get svc -n blue-green
+                    echo "  Blue  (stable :42): http://\$(kubectl get svc aceest-backend-blue-svc  -n blue-green -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Green (new    :43): http://\$(kubectl get svc aceest-backend-green-svc -n blue-green -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Active traffic svc: http://\$(kubectl get svc aceest-backend-bg-svc    -n blue-green -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
 
                     echo ""
                     echo "--- Canary (namespace: canary) ---"
-                    kubectl get svc -n canary
+                    echo "  Stable (:42): http://\$(kubectl get svc aceest-backend-stable-svc -n canary -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Canary (:43): http://\$(kubectl get svc aceest-backend-canary-svc -n canary -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
 
                     echo ""
                     echo "--- Shadow (namespace: shadow) ---"
-                    kubectl get svc -n shadow
+                    echo "  Stable (real traffic :42): http://\$(kubectl get svc aceest-backend-stable-svc  -n shadow -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Shadow (mirrored     :43): http://\$(kubectl get svc aceest-backend-shadow-svc  -n shadow -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Frontend             :42 : http://\$(kubectl get svc aceest-frontend-shadow-svc -n shadow -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
 
                     echo ""
                     echo "--- AB Testing (namespace: ab-testing) ---"
-                    kubectl get svc -n ab-testing
+                    echo "  Group A backend  (:42): http://\$(kubectl get svc aceest-backend-version-a-svc  -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Group B backend  (:43): http://\$(kubectl get svc aceest-backend-version-b-svc  -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Group A frontend (:42): http://\$(kubectl get svc aceest-frontend-version-a-svc -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Group B frontend (:43): http://\$(kubectl get svc aceest-frontend-version-b-svc -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
 
                     echo ""
                     echo "================================================================"
                     echo " NOTES:"
-                    echo " - All services use LoadBalancer type"
-                    echo " - Access each URL at http://<EXTERNAL-IP>/health"
-                    echo " - Blue-Green: patch svc selector to switch blue/green"
-                    echo " - Canary: scale canary replicas to promote"
+                    echo " - Blue-Green: patch svc selector to switch blue<->green"
+                    echo " - Canary: stable gets 2/3 traffic, canary gets 1/3"
+                    echo " - Shadow: only stable-svc serves real users, shadow discards responses"
+                    echo " - A/B: Group A=Blue(:42 control), Group B=Green(:43 variant)"
                     echo "================================================================"
                 """
             }
@@ -402,7 +406,6 @@ pipeline {
             ========================================
              PIPELINE SUCCESS
              Build    : #${env.BUILD_NUMBER}
-             Strategy : ${params.STRATEGY}
              Backend  : ${BACKEND_IMAGE}:${TAG}
              Frontend : ${FRONTEND_IMAGE}:${TAG}
              Cluster  : aceest-cluster (GKE)

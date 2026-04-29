@@ -10,7 +10,7 @@ metadata:
   annotations:
     role: production
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: aceest
@@ -45,7 +45,7 @@ metadata:
   annotations:
     role: shadow-testing
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: aceest
@@ -71,3 +71,30 @@ spec:
               port: 5005
             initialDelaySeconds: 10
             periodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-frontend-shadow
+  namespace: shadow
+  annotations:
+    role: production-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aceest
+      tier: frontend
+  template:
+    metadata:
+      labels:
+        app: aceest
+        tier: frontend
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+      containers:
+        - name: aceest-frontend
+          image: sasanmanpreet91/aceest-fitness-gym-ui:42
+          ports:
+            - containerPort: 80
