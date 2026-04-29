@@ -80,8 +80,8 @@ pipeline {
             }
         }
 
-        // ── 5. Docker Build (multi-platform: amd64 + arm64) ─────────
-        stage('Docker Build') {
+        // ── 5. Docker Login + Builder Setup ──────────────────────────
+        stage('Docker Login') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-creds',
@@ -89,45 +89,50 @@ pipeline {
                     passwordVariable: 'DH_PASS'
                 )]) {
                     sh """
-                        # Login first so buildx container can push
                         echo \$DH_PASS | docker login -u \$DH_USER --password-stdin
-
-                        # Setup multi-platform builder
                         docker buildx create --use --name multi-builder \
                             --driver docker-container \
                             --platform linux/amd64,linux/arm64 2>/dev/null || \
                         docker buildx use multi-builder
+                        echo "Docker login and buildx builder ready"
                     """
-
-                    parallel(
-                        "Backend": {
-                            sh """
-                                docker buildx build \
-                                    --platform linux/amd64,linux/arm64 \
-                                    -t ${BACKEND_IMAGE}:${TAG} \
-                                    -t ${BACKEND_IMAGE}:latest \
-                                    --push \
-                                    ./backend
-                                echo "Backend pushed: ${BACKEND_IMAGE}:${TAG} (amd64 + arm64)"
-                            """
-                        },
-                        "Frontend": {
-                            sh """
-                                docker buildx build \
-                                    --platform linux/amd64,linux/arm64 \
-                                    -t ${FRONTEND_IMAGE}:${TAG} \
-                                    -t ${FRONTEND_IMAGE}:latest \
-                                    --push \
-                                    ./frontend
-                                echo "Frontend pushed: ${FRONTEND_IMAGE}:${TAG} (amd64 + arm64)"
-                            """
-                        }
-                    )
                 }
             }
         }
 
-        // ── 6. Verify Docker Hub Push ─────────────────────────────────
+        // ── 6. Docker Build (multi-platform: amd64 + arm64) ──────────
+        stage('Docker Build') {
+            parallel {
+                stage('[Backend] Build') {
+                    steps {
+                        sh """
+                            docker buildx build \
+                                --platform linux/amd64,linux/arm64 \
+                                -t ${BACKEND_IMAGE}:${TAG} \
+                                -t ${BACKEND_IMAGE}:latest \
+                                --push \
+                                ./backend
+                            echo "Backend pushed: ${BACKEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        """
+                    }
+                }
+                stage('[Frontend] Build') {
+                    steps {
+                        sh """
+                            docker buildx build \
+                                --platform linux/amd64,linux/arm64 \
+                                -t ${FRONTEND_IMAGE}:${TAG} \
+                                -t ${FRONTEND_IMAGE}:latest \
+                                --push \
+                                ./frontend
+                            echo "Frontend pushed: ${FRONTEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── 7. Verify Docker Hub Push ─────────────────────────────────
         stage('Verify Push') {
             steps {
                 withCredentials([usernamePassword(
@@ -153,7 +158,7 @@ pipeline {
             }
         }
 
-        // ── 7. Deploy Containers ──────────────────────────────────────
+        // ── 8. Deploy Containers ──────────────────────────────────────
         stage('Deploy Containers') {
             steps {
                 withCredentials([
@@ -192,7 +197,7 @@ pipeline {
             }
         }
 
-        // ── 8. Acceptance Tests ───────────────────────────────────────
+        // ── 9. Acceptance Tests ───────────────────────────────────────
         stage('Acceptance Tests') {
             steps {
                 withCredentials([
@@ -222,8 +227,7 @@ pipeline {
             }
         }
 
-        // ── GKE DEPLOY STAGES (commented out — enable after multi-platform images are confirmed) ──
-        // ── 9. GKE Auth + Setup ───────────────────────────────────────
+        // ── 10. GKE Auth + Setup ─────────────────────────────────────
         stage('GKE Auth') {
             when {
                 anyOf {
@@ -269,7 +273,7 @@ pipeline {
             }
         }
 
-        // ── 10. Deploy All Strategies in Parallel ─────────────────────
+        // ── 11. Deploy All Strategies in Parallel ─────────────────────
         stage('Deploy All Strategies') {
             when {
                 anyOf {
@@ -339,7 +343,7 @@ pipeline {
             }
         }
 
-        // ── 11. Print All Public URLs ──────────────────────────────────
+        // ── 12. Print All Public URLs ──────────────────────────────────
         stage('Public URLs') {
             when {
                 anyOf {
@@ -390,8 +394,6 @@ pipeline {
             }
         }
     }
-
-
 
     // ── Post Actions ──────────────────────────────────────────────────
     post {
