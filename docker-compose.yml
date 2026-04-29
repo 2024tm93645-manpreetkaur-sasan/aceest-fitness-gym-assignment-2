@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  backend:
+    build: ./backend
+    container_name: aceest-backend
+    ports:
+      - "5005:5005"
+    environment:
+      - FLASK_ENV=production
+      - DB_NAME=/data/aceest_fitness.db
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-aceest-super-secret-key}
+    volumes:
+      - aceest_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    container_name: aceest-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  aceest_data:

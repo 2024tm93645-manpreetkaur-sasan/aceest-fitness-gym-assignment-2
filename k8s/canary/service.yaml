@@ -1,0 +1,33 @@
+# Canary Services
+# aceest-backend-canary-svc routes to canary pods only (new version :43)
+# aceest-backend-stable-svc routes to stable pods only (stable version :42)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-backend-stable-svc
+  namespace: canary
+spec:
+  type: LoadBalancer
+  selector:
+    app: aceest
+    tier: backend
+    track: stable
+  ports:
+  - port: 80
+    targetPort: 5005
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-backend-canary-svc
+  namespace: canary
+spec:
+  type: LoadBalancer
+  selector:
+    app: aceest
+    tier: backend
+    track: canary
+  ports:
+  - port: 80
+    targetPort: 5005

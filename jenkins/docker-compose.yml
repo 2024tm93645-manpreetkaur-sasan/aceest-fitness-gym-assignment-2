@@ -1,0 +1,43 @@
+services:
+  jenkins:
+    build: .
+    container_name: jenkins
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount Mac kubeconfig and minikube certs (writable so paths can be fixed)
+      - ${HOME}/.kube:/var/jenkins_home/.kube
+      - ${HOME}/.minikube:/var/jenkins_home/.minikube
+    networks:
+      - devops-net
+    depends_on:
+      - sonarqube
+
+  sonarqube:
+    image: sonarqube:25.1.0.102122-community
+    container_name: sonarqube
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+      - sonarqube_extensions:/opt/sonarqube/extensions
+    networks:
+      - devops-net
+
+networks:
+  devops-net:
+    name: devops-net
+
+volumes:
+  jenkins_home:
+  sonarqube_data:
+  sonarqube_logs:
+  sonarqube_extensions:

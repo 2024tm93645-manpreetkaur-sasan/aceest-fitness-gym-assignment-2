@@ -1,0 +1,432 @@
+pipeline {
+
+    agent any
+
+    environment {
+        DOCKERHUB_USER  = 'sasanmanpreet91'
+        BACKEND_IMAGE   = "${DOCKERHUB_USER}/aceest-fitness-gym-api"
+        FRONTEND_IMAGE  = "${DOCKERHUB_USER}/aceest-fitness-gym-ui"
+        TAG             = "${env.BUILD_NUMBER}"
+        BACKEND_PORT    = '5005'
+        SONAR_PROJECT   = 'aceest-fitness-gym'
+    }
+
+    stages {
+
+        // ── 1. Checkout ───────────────────────────────────────────────
+        stage('Checkout') {
+            steps {
+                checkout scm
+                echo "Branch: ${env.GIT_BRANCH} | Build: #${env.BUILD_NUMBER}"
+            }
+        }
+
+        // ── 2. Unit Tests ─────────────────────────────────────────────
+        stage('Unit Tests') {
+            steps {
+                dir('backend') {
+                    sh '''
+                        pip install -r requirements.txt pytest-cov coverage --break-system-packages -q
+                        python3 -m pytest tests/ -v \
+                            --junitxml=test-results.xml \
+                            --cov=. \
+                            --cov-report=xml:coverage.xml
+                    '''
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true,
+                          testResults: 'backend/test-results.xml'
+                }
+            }
+        }
+
+        // ── 3. SonarQube Analysis ─────────────────────────────────────
+        stage('SonarQube Analysis') {
+            steps {
+                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            sonar-scanner \
+                                -Dsonar.projectKey=${SONAR_PROJECT} \
+                                -Dsonar.projectName="ACEest Fitness and Gym" \
+                                -Dsonar.sources=backend \
+                                -Dsonar.exclusions=backend/tests/**,backend/utils/pdf.py \
+                                -Dsonar.python.coverage.reportPaths=backend/coverage.xml \
+                                -Dsonar.python.version=3.11 \
+                                -Dsonar.host.url=http://sonarqube:9000 \
+                                -Dsonar.token=$SONAR_TOKEN
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── 4. Quality Gate ───────────────────────────────────────────
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ── 5. Docker Login + Builder Setup ──────────────────────────
+        stage('Docker Login') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DH_USER',
+                    passwordVariable: 'DH_PASS'
+                )]) {
+                    sh """
+                        echo \$DH_PASS | docker login -u \$DH_USER --password-stdin
+                        docker buildx create --use --name multi-builder \
+                            --driver docker-container \
+                            --platform linux/amd64,linux/arm64 2>/dev/null || \
+                        docker buildx use multi-builder
+                        echo "Docker login and buildx builder ready"
+                    """
+                }
+            }
+        }
+
+        // ── 6. Docker Build (multi-platform: amd64 + arm64) ──────────
+        stage('Docker Build') {
+            parallel {
+                stage('[Backend] Build') {
+                    steps {
+                        sh """
+                            docker buildx build \
+                                --platform linux/amd64,linux/arm64 \
+                                -t ${BACKEND_IMAGE}:${TAG} \
+                                -t ${BACKEND_IMAGE}:latest \
+                                --push \
+                                ./backend
+                            echo "Backend pushed: ${BACKEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        """
+                    }
+                }
+                stage('[Frontend] Build') {
+                    steps {
+                        sh """
+                            docker buildx build \
+                                --platform linux/amd64,linux/arm64 \
+                                -t ${FRONTEND_IMAGE}:${TAG} \
+                                -t ${FRONTEND_IMAGE}:latest \
+                                --push \
+                                ./frontend
+                            echo "Frontend pushed: ${FRONTEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── 7. Verify Docker Hub Push ─────────────────────────────────
+        stage('Verify Push') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DH_USER',
+                    passwordVariable: 'DH_PASS'
+                )]) {
+                    sh """
+                        echo \$DH_PASS | docker login -u \$DH_USER --password-stdin
+
+                        echo "Verifying multi-platform manifests on Docker Hub..."
+                        docker buildx imagetools inspect ${BACKEND_IMAGE}:${TAG} | grep -E "Platform|Image"
+                        docker buildx imagetools inspect ${FRONTEND_IMAGE}:${TAG} | grep -E "Platform|Image"
+
+                        echo "================================================================"
+                        echo " IMAGES VERIFIED ON DOCKER HUB"
+                        echo " Backend : ${BACKEND_IMAGE}:${TAG}"
+                        echo " Frontend: ${FRONTEND_IMAGE}:${TAG}"
+                        echo " Platforms: linux/amd64, linux/arm64"
+                        echo "================================================================"
+                    """
+                }
+            }
+        }
+
+        // ── 8. Deploy Containers ──────────────────────────────────────
+        stage('Deploy Containers') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'jwt-secret', variable: 'JWT_SECRET_KEY')
+                ]) {
+                    sh '''
+                        docker rm -f aceest-backend aceest-frontend || true
+                        docker network rm aceest-net || true
+                        docker network create aceest-net
+
+                        docker run -d --name aceest-backend \
+                            --network aceest-net \
+                            -e JWT_SECRET_KEY=$JWT_SECRET_KEY \
+                            -e DB_NAME=/tmp/aceest.db \
+                            ${BACKEND_IMAGE}:${TAG}
+
+                        docker run -d --name aceest-frontend \
+                            --network aceest-net \
+                            ${FRONTEND_IMAGE}:${TAG}
+
+                        sleep 15
+
+                        echo "=== Backend container logs ==="
+                        docker logs aceest-backend
+                        echo "=============================="
+
+                        JENKINS_CONTAINER=$(hostname)
+                        docker network connect aceest-net $JENKINS_CONTAINER || true
+
+                        curl --fail http://aceest-backend:${BACKEND_PORT}/health
+                        echo "Containers are up"
+
+                        echo "aceest-backend" > /tmp/backend_host.txt
+                    '''
+                }
+            }
+        }
+
+        // ── 9. Acceptance Tests ───────────────────────────────────────
+        stage('Acceptance Tests') {
+            steps {
+                withCredentials([
+                    string(credentialsId: 'app-admin-username', variable: 'ADMIN_USERNAME'),
+                    string(credentialsId: 'app-admin-password', variable: 'ADMIN_PASSWORD')
+                ]) {
+                    sh '''
+                        pip install -r acceptance-tests/requirements.txt \
+                            --break-system-packages -q
+
+                        BACKEND_HOST=$(cat /tmp/backend_host.txt)
+                        echo "Running acceptance tests against http://${BACKEND_HOST}:${BACKEND_PORT}"
+
+                        APP_URL=http://${BACKEND_HOST}:${BACKEND_PORT} \
+                        ADMIN_USERNAME=$ADMIN_USERNAME \
+                        ADMIN_PASSWORD=$ADMIN_PASSWORD \
+                        python3 -m pytest acceptance-tests/ -v \
+                            --junitxml=acceptance-test-results.xml
+                    '''
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true,
+                          testResults: 'acceptance-test-results.xml'
+                }
+            }
+        }
+
+        // ── 10. GKE Auth + Setup ─────────────────────────────────────
+        stage('GKE Auth') {
+            when {
+                anyOf {
+                    branch 'main'
+                    expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
+                }
+            }
+            steps {
+                withCredentials([
+                    file(credentialsId: 'gcp-service-account', variable: 'GCP_KEY'),
+                    usernamePassword(credentialsId: 'dockerhub-creds', usernameVariable: 'DH_USER', passwordVariable: 'DH_PASS')
+                ]) {
+                    sh """
+                        gcloud auth activate-service-account --key-file=\$GCP_KEY
+                        gcloud config set project aceest-devops
+                        gcloud container clusters get-credentials aceest-cluster \
+                            --zone asia-south1-a --project aceest-devops
+
+                        # Create all namespaces
+                        kubectl apply -f k8s/rolling-update/namespace.yaml
+                        kubectl apply -f k8s/blue-green/namespace.yaml
+                        kubectl apply -f k8s/canary/namespace.yaml
+                        kubectl apply -f k8s/shadow/namespace.yaml
+                        kubectl apply -f k8s/ab-testing/namespace.yaml
+
+                        # Create Docker Hub pull secret in all namespaces
+                        for NS in rolling blue-green canary shadow ab-testing; do
+                            kubectl create secret docker-registry dockerhub-secret \
+                                --docker-username=sasanmanpreet91 \
+                                --docker-password=$DH_PASS \
+                                --docker-server=https://index.docker.io/v1/ \
+                                --namespace=\$NS \
+                                --dry-run=client -o yaml | kubectl apply -f -
+                        done
+
+                        # Create JWT secret in rolling namespace
+                        kubectl apply -f k8s/rolling-update/secret.yaml
+
+                        echo "GKE setup complete"
+                        kubectl get nodes
+                    """
+                }
+            }
+        }
+
+        // ── 11. Deploy All Strategies in Parallel ─────────────────────
+        stage('Deploy All Strategies') {
+            when {
+                anyOf {
+                    branch 'main'
+                    expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
+                }
+            }
+            parallel {
+
+                stage('Rolling Update') {
+                    steps {
+                        sh """
+                            sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
+                                k8s/rolling-update/deployment.yaml | kubectl apply -n rolling -f -
+                            kubectl apply -n rolling -f k8s/rolling-update/service.yaml
+                            kubectl rollout status deployment/aceest-backend -n rolling --timeout=300s
+                            kubectl rollout status deployment/aceest-frontend -n rolling --timeout=300s
+                            echo "Rolling Update deployed"
+                        """
+                    }
+                }
+
+                stage('Blue-Green') {
+                    steps {
+                        sh """
+                            kubectl delete deployment aceest-backend-blue aceest-backend-green -n blue-green 2>/dev/null || true
+                            kubectl apply -n blue-green -f k8s/blue-green/deployment.yaml
+                            kubectl apply -n blue-green -f k8s/blue-green/service.yaml
+                            kubectl rollout status deployment/aceest-backend-blue -n blue-green --timeout=300s
+                            echo "Blue-Green deployed"
+                        """
+                    }
+                }
+
+                stage('Canary') {
+                    steps {
+                        sh """
+                            kubectl delete deployment aceest-backend-stable aceest-backend-canary -n canary 2>/dev/null || true
+                            kubectl apply -n canary -f k8s/canary/deployment.yaml
+                            kubectl apply -n canary -f k8s/canary/service.yaml
+                            kubectl rollout status deployment/aceest-backend-stable -n canary --timeout=300s
+                            echo "Canary deployed"
+                        """
+                    }
+                }
+
+                stage('Shadow') {
+                    steps {
+                        sh """
+                            kubectl delete deployment aceest-backend-stable-shadow aceest-backend-shadow -n shadow 2>/dev/null || true
+                            kubectl apply -n shadow -f k8s/shadow/deployment.yaml
+                            kubectl apply -n shadow -f k8s/shadow/service.yaml
+                            kubectl rollout status deployment/aceest-backend-stable-shadow -n shadow --timeout=300s
+                            echo "Shadow deployed"
+                        """
+                    }
+                }
+
+                stage('AB Testing') {
+                    steps {
+                        sh """
+                            kubectl delete deployment aceest-backend-version-a aceest-backend-version-b -n ab-testing 2>/dev/null || true
+                            kubectl apply -n ab-testing -f k8s/ab-testing/deployment.yaml
+                            kubectl apply -n ab-testing -f k8s/ab-testing/service.yaml
+                            kubectl rollout status deployment/aceest-backend-version-a -n ab-testing --timeout=300s
+                            echo "AB Testing deployed"
+                        """
+                    }
+                }
+
+            }
+        }
+
+        // ── 12. Print All Public URLs ──────────────────────────────────
+        stage('Public URLs') {
+            when {
+                anyOf {
+                    branch 'main'
+                    expression { env.GIT_BRANCH ==~ /.*feature\/k8s-manifests.*/ }
+                }
+            }
+            steps {
+                sh """
+                    echo "Waiting 60s for LoadBalancer IPs to be assigned..."
+                    sleep 60
+
+                    echo ""
+                    echo "================================================================"
+                    echo " ALL STRATEGIES DEPLOYED - ACEest Fitness & Gym on GKE"
+                    echo " Build #${TAG} | Cluster: aceest-cluster (asia-south1-a)"
+                    echo "================================================================"
+
+                    echo ""
+                    echo "--- Rolling Update (namespace: rolling) ---"
+                    kubectl get svc -n rolling
+
+                    echo ""
+                    echo "--- Blue-Green (namespace: blue-green) ---"
+                    echo "  Blue  (stable :42): http://\$(kubectl get svc aceest-backend-blue-svc  -n blue-green -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Green (new    :43): http://\$(kubectl get svc aceest-backend-green-svc -n blue-green -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Active traffic svc: http://\$(kubectl get svc aceest-backend-bg-svc    -n blue-green -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+
+                    echo ""
+                    echo "--- Canary (namespace: canary) ---"
+                    echo "  Stable (:42): http://\$(kubectl get svc aceest-backend-stable-svc -n canary -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Canary (:43): http://\$(kubectl get svc aceest-backend-canary-svc -n canary -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+
+                    echo ""
+                    echo "--- Shadow (namespace: shadow) ---"
+                    echo "  Stable (real traffic :42): http://\$(kubectl get svc aceest-backend-stable-svc  -n shadow -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Shadow (mirrored     :43): http://\$(kubectl get svc aceest-backend-shadow-svc  -n shadow -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Frontend             :42 : http://\$(kubectl get svc aceest-frontend-shadow-svc -n shadow -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+
+                    echo ""
+                    echo "--- AB Testing (namespace: ab-testing) ---"
+                    echo "  Group A backend  (:42): http://\$(kubectl get svc aceest-backend-version-a-svc  -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Group B backend  (:43): http://\$(kubectl get svc aceest-backend-version-b-svc  -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Group A frontend (:42): http://\$(kubectl get svc aceest-frontend-version-a-svc -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+                    echo "  Group B frontend (:43): http://\$(kubectl get svc aceest-frontend-version-b-svc -n ab-testing -o jsonpath='{.status.loadBalancer.ingress[0].ip}')"
+
+                    echo ""
+                    echo "================================================================"
+                    echo " NOTES:"
+                    echo " - Blue-Green: patch svc selector to switch blue<->green"
+                    echo " - Canary: stable gets 2/3 traffic, canary gets 1/3"
+                    echo " - Shadow: only stable-svc serves real users, shadow discards responses"
+                    echo " - A/B: Group A=Blue(:42 control), Group B=Green(:43 variant)"
+                    echo "================================================================"
+                """
+            }
+        }
+    }
+
+    // ── Post Actions ──────────────────────────────────────────────────
+    post {
+        success {
+            echo """
+            ========================================
+             PIPELINE SUCCESS
+             Build    : #${env.BUILD_NUMBER}
+             Backend  : ${BACKEND_IMAGE}:${TAG}
+             Frontend : ${FRONTEND_IMAGE}:${TAG}
+             Cluster  : aceest-cluster (GKE)
+            ========================================
+            """
+        }
+        failure {
+            echo "PIPELINE FAILED - initiating rollback on rolling-update namespace..."
+            sh """
+                gcloud container clusters get-credentials aceest-cluster \
+                    --zone asia-south1-a --project aceest-devops 2>/dev/null || true
+                kubectl rollout undo deployment/aceest-backend  -n rolling 2>/dev/null || true
+                kubectl rollout undo deployment/aceest-frontend -n rolling 2>/dev/null || true
+                echo "Rollback complete"
+            """
+        }
+        always {
+            sh "docker rm -f aceest-backend aceest-frontend || true"
+            sh "docker network disconnect aceest-net \$(hostname) || true"
+            sh "docker network rm aceest-net || true"
+            sh "docker logout || true"
+        }
+    }
+}

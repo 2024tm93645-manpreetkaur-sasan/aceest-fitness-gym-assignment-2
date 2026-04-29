@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-backend-version-a-svc
+  namespace: ab-testing
+  annotations:
+    user-segment: "control - existing users"
+spec:
+  type: LoadBalancer
+  selector:
+    app: aceest
+    tier: backend
+    variant: version-a
+  ports:
+  - port: 80
+    targetPort: 5005
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-backend-version-b-svc
+  namespace: ab-testing
+  annotations:
+    user-segment: "variant - beta users"
+spec:
+  type: LoadBalancer
+  selector:
+    app: aceest
+    tier: backend
+    variant: version-b
+  ports:
+  - port: 80
+    targetPort: 5005
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-frontend-version-a-svc
+  namespace: ab-testing
+spec:
+  type: LoadBalancer
+  selector:
+    app: aceest
+    tier: frontend
+    variant: version-a
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aceest-frontend-version-b-svc
+  namespace: ab-testing
+spec:
+  type: LoadBalancer
+  selector:
+    app: aceest
+    tier: frontend
+    variant: version-b
+  ports:
+  - port: 80
+    targetPort: 80
