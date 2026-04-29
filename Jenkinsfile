@@ -223,7 +223,6 @@ pipeline {
         }
 
         // ── GKE DEPLOY STAGES (commented out — enable after multi-platform images are confirmed) ──
-        /*
         // ── 9. GKE Auth + Setup ───────────────────────────────────────
         stage('GKE Auth') {
             when {
@@ -391,7 +390,7 @@ pipeline {
             }
         }
     }
-        */
+
 
 
     // ── Post Actions ──────────────────────────────────────────────────
