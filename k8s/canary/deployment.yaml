@@ -1,0 +1,72 @@
+# Canary — 2 stable + 1 canary = ~33% traffic to new version
+# Stable = :42 Ocean Blue theme | Canary = :43 Forest Green theme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-backend-stable
+  namespace: canary
+  annotations:
+    role: stable
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest
+      tier: backend
+      track: stable
+  template:
+    metadata:
+      labels:
+        app: aceest
+        tier: backend
+        track: stable
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+      containers:
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:42
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-backend-canary
+  namespace: canary
+  annotations:
+    role: canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aceest
+      tier: backend
+      track: canary
+  template:
+    metadata:
+      labels:
+        app: aceest
+        tier: backend
+        track: canary
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+      containers:
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:43
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5

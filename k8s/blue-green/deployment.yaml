@@ -1,0 +1,72 @@
+# Blue-Green — two full deployments run simultaneously
+# Stable (Blue) = :42 Ocean Blue theme | New (Green) = :43 Forest Green theme
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-backend-blue
+  namespace: blue-green
+  annotations:
+    role: stable
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest
+      tier: backend
+      slot: blue
+  template:
+    metadata:
+      labels:
+        app: aceest
+        tier: backend
+        slot: blue
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+      containers:
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:42
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-backend-green
+  namespace: blue-green
+  annotations:
+    role: new-version
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: aceest
+      tier: backend
+      slot: green
+  template:
+    metadata:
+      labels:
+        app: aceest
+        tier: backend
+        slot: green
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+      containers:
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:43
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5
