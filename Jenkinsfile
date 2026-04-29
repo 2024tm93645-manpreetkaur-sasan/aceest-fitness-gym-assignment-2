@@ -206,11 +206,11 @@ pipeline {
                             --zone asia-south1-a --project aceest-devops
 
                         # Create all namespaces
-                        kubectl apply -f k8s-gke/rolling-update/namespace.yaml
-                        kubectl apply -f k8s-gke/blue-green/namespace.yaml
-                        kubectl apply -f k8s-gke/canary/namespace.yaml
-                        kubectl apply -f k8s-gke/shadow/namespace.yaml
-                        kubectl apply -f k8s-gke/ab-testing/namespace.yaml
+                        kubectl apply -f k8s/rolling-update/namespace.yaml
+                        kubectl apply -f k8s/blue-green/namespace.yaml
+                        kubectl apply -f k8s/canary/namespace.yaml
+                        kubectl apply -f k8s/shadow/namespace.yaml
+                        kubectl apply -f k8s/ab-testing/namespace.yaml
 
                         # Create Docker Hub pull secret in all namespaces
                         for NS in rolling blue-green canary shadow ab-testing; do
@@ -223,7 +223,7 @@ pipeline {
                         done
 
                         # Create JWT secret in rolling namespace
-                        kubectl apply -f k8s-gke/rolling-update/secret.yaml
+                        kubectl apply -f k8s/rolling-update/secret.yaml
 
                         echo "GKE setup complete"
                         kubectl get nodes
@@ -246,8 +246,8 @@ pipeline {
                     steps {
                         sh """
                             sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
-                                k8s-gke/rolling-update/deployment.yaml | kubectl apply -n rolling -f -
-                            kubectl apply -n rolling -f k8s-gke/rolling-update/service.yaml
+                                k8s/rolling-update/deployment.yaml | kubectl apply -n rolling -f -
+                            kubectl apply -n rolling -f k8s/rolling-update/service.yaml
                             kubectl rollout status deployment/aceest-backend -n rolling --timeout=180s
                             kubectl rollout status deployment/aceest-frontend -n rolling --timeout=180s
                             echo "Rolling Update deployed"
@@ -258,8 +258,8 @@ pipeline {
                 stage('Blue-Green') {
                     steps {
                         sh """
-                            kubectl apply -n blue-green -f k8s-gke/blue-green/deployment.yaml
-                            kubectl apply -n blue-green -f k8s-gke/blue-green/service.yaml
+                            kubectl apply -n blue-green -f k8s/blue-green/deployment.yaml
+                            kubectl apply -n blue-green -f k8s/blue-green/service.yaml
                             kubectl rollout status deployment/aceest-backend-blue -n blue-green --timeout=180s
                             echo "Blue-Green deployed"
                         """
@@ -269,8 +269,8 @@ pipeline {
                 stage('Canary') {
                     steps {
                         sh """
-                            kubectl apply -n canary -f k8s-gke/canary/deployment.yaml
-                            kubectl apply -n canary -f k8s-gke/canary/service.yaml
+                            kubectl apply -n canary -f k8s/canary/deployment.yaml
+                            kubectl apply -n canary -f k8s/canary/service.yaml
                             kubectl rollout status deployment/aceest-backend-stable -n canary --timeout=180s
                             echo "Canary deployed"
                         """
@@ -280,8 +280,8 @@ pipeline {
                 stage('Shadow') {
                     steps {
                         sh """
-                            kubectl apply -n shadow -f k8s-gke/shadow/deployment.yaml
-                            kubectl apply -n shadow -f k8s-gke/shadow/service.yaml
+                            kubectl apply -n shadow -f k8s/shadow/deployment.yaml
+                            kubectl apply -n shadow -f k8s/shadow/service.yaml
                             kubectl rollout status deployment/aceest-backend-stable-shadow -n shadow --timeout=180s
                             echo "Shadow deployed"
                         """
@@ -291,8 +291,8 @@ pipeline {
                 stage('AB Testing') {
                     steps {
                         sh """
-                            kubectl apply -n ab-testing -f k8s-gke/ab-testing/deployment.yaml
-                            kubectl apply -n ab-testing -f k8s-gke/ab-testing/service.yaml
+                            kubectl apply -n ab-testing -f k8s/ab-testing/deployment.yaml
+                            kubectl apply -n ab-testing -f k8s/ab-testing/service.yaml
                             kubectl rollout status deployment/aceest-backend-version-a -n ab-testing --timeout=180s
                             echo "AB Testing deployed"
                         """
