@@ -80,8 +80,53 @@ pipeline {
             }
         }
 
-        // ── 5 & 6. Docker Build + Push (multi-platform: amd64 + arm64) ──
-        stage('Docker Build & Push') {
+        // ── 5. Docker Build (multi-platform: amd64 + arm64) ─────────
+        stage('Docker Build') {
+            parallel {
+                stage('[Backend] Build') {
+                    steps {
+                        sh """
+                            # Setup multi-platform builder
+                            docker buildx create --use --name multi-builder \
+                                --driver docker-container \
+                                --platform linux/amd64,linux/arm64 2>/dev/null || \
+                            docker buildx use multi-builder
+
+                            docker buildx build \
+                                --platform linux/amd64,linux/arm64 \
+                                -t ${BACKEND_IMAGE}:${TAG} \
+                                -t ${BACKEND_IMAGE}:latest \
+                                --push \
+                                ./backend
+
+                            echo "Backend pushed: ${BACKEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        """
+                    }
+                }
+                stage('[Frontend] Build') {
+                    steps {
+                        sh """
+                            docker buildx create --use --name multi-builder \
+                                --driver docker-container \
+                                --platform linux/amd64,linux/arm64 2>/dev/null || \
+                            docker buildx use multi-builder
+
+                            docker buildx build \
+                                --platform linux/amd64,linux/arm64 \
+                                -t ${FRONTEND_IMAGE}:${TAG} \
+                                -t ${FRONTEND_IMAGE}:latest \
+                                --push \
+                                ./frontend
+
+                            echo "Frontend pushed: ${FRONTEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        """
+                    }
+                }
+            }
+        }
+
+        // ── 6. Verify Docker Hub Push ─────────────────────────────────
+        stage('Verify Push') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-creds',
@@ -91,31 +136,16 @@ pipeline {
                     sh """
                         echo \$DH_PASS | docker login -u \$DH_USER --password-stdin
 
-                        # Create/reuse buildx builder
-                        docker buildx create --use --name multi-builder \\
-                            --driver docker-container \\
-                            --platform linux/amd64,linux/arm64 2>/dev/null || \\
-                        docker buildx use multi-builder
+                        echo "Verifying multi-platform manifests on Docker Hub..."
+                        docker buildx imagetools inspect ${BACKEND_IMAGE}:${TAG} | grep -E "Platform|Image"
+                        docker buildx imagetools inspect ${FRONTEND_IMAGE}:${TAG} | grep -E "Platform|Image"
 
-                        # Build and push backend (amd64 + arm64)
-                        docker buildx build \\
-                            --platform linux/amd64,linux/arm64 \\
-                            -t ${BACKEND_IMAGE}:${TAG} \\
-                            -t ${BACKEND_IMAGE}:latest \\
-                            --push \\
-                            ./backend
-
-                        # Build and push frontend (amd64 + arm64)
-                        docker buildx build \\
-                            --platform linux/amd64,linux/arm64 \\
-                            -t ${FRONTEND_IMAGE}:${TAG} \\
-                            -t ${FRONTEND_IMAGE}:latest \\
-                            --push \\
-                            ./frontend
-
-                        echo "Multi-platform images pushed:"
-                        echo "  ${BACKEND_IMAGE}:${TAG} (amd64 + arm64)"
-                        echo "  ${FRONTEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        echo "================================================================"
+                        echo " IMAGES VERIFIED ON DOCKER HUB"
+                        echo " Backend : ${BACKEND_IMAGE}:${TAG}"
+                        echo " Frontend: ${FRONTEND_IMAGE}:${TAG}"
+                        echo " Platforms: linux/amd64, linux/arm64"
+                        echo "================================================================"
                     """
                 }
             }
@@ -191,7 +221,7 @@ pipeline {
         }
 
         // ── GKE DEPLOY STAGES (commented out — enable after multi-platform images are confirmed) ──
-        /*
+
         // ── 9. GKE Auth + Setup ───────────────────────────────────────
         stage('GKE Auth') {
             when {
@@ -359,7 +389,7 @@ pipeline {
             }
         }
     }
-        */
+
 
 
     // ── Post Actions ──────────────────────────────────────────────────
