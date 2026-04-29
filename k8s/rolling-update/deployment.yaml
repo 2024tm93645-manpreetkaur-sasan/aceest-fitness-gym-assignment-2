@@ -4,7 +4,7 @@ metadata:
   name: aceest-backend
   namespace: rolling
 spec:
-  replicas: 2
+  replicas: 1 # Stability: start with 1 to ensure it passes, then scale up
   selector:
     matchLabels:
       app: aceest
@@ -12,8 +12,8 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
+      maxSurge: 1       # Start 1 new pod
+      maxUnavailable: 1 # Kill 1 old pod immediately to free up RAM on your 2 nodes
   template:
     metadata:
       labels:
@@ -21,26 +21,35 @@ spec:
         tier: backend
     spec:
       imagePullSecrets:
-      - name: dockerhub-secret
+        - name: dockerhub-secret
       containers:
-      - name: aceest-backend
-        image: sasanmanpreet91/aceest-fitness-gym-api:latest
-        ports:
-        - containerPort: 5005
-        env:
-        - name: JWT_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: aceest-secrets
-              key: jwt-secret
-        - name: DB_NAME
-          value: "/data/aceest_fitness.db"
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5005
-          initialDelaySeconds: 10
-          periodSeconds: 5
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:44 # Fixed AMD64 version
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          ports:
+            - containerPort: 5005
+          env:
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aceest-secrets
+                  key: jwt-secret
+            - name: DB_NAME
+              value: "/data/aceest_fitness.db"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 30 # Crucial: gives the app time to bind to the port
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6    # Allow 1 minute of "not ready" before failing
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -48,7 +57,7 @@ metadata:
   name: aceest-frontend
   namespace: rolling
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: aceest
@@ -57,7 +66,7 @@ spec:
     type: RollingUpdate
     rollingUpdate:
       maxSurge: 1
-      maxUnavailable: 0
+      maxUnavailable: 1
   template:
     metadata:
       labels:
@@ -65,18 +74,25 @@ spec:
         tier: frontend
     spec:
       imagePullSecrets:
-      - name: dockerhub-secret
+        - name: dockerhub-secret
       containers:
-      - name: aceest-frontend
-        image: sasanmanpreet91/aceest-fitness-gym-ui:latest
-        ports:
-        - containerPort: 80
-        env:
-        - name: BACKEND_HOST
-          value: "aceest-backend-svc"
-        readinessProbe:
-          httpGet:
-            path: /
-            port: 80
-          initialDelaySeconds: 10
-          periodSeconds: 5
+        - name: aceest-frontend
+          image: sasanmanpreet91/aceest-fitness-gym-ui:44
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "100m"
+          ports:
+            - containerPort: 80
+          env:
+            - name: BACKEND_HOST
+              value: "aceest-backend-svc"
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 15
+            periodSeconds: 10
