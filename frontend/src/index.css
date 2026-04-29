@@ -2,32 +2,35 @@
   ACEest Fitness & Gym — Frontend Stylesheet
 
   VERSION HISTORY:
-  v1 (build :38) — Gold/Dark theme  → used as STABLE version in all deployment strategies
-  v2 (build :39) — Ocean Blue theme → used as NEW version in blue-green, canary, shadow, ab-testing
+  v1 (build :38) — Gold/Dark theme    → ARM64 only (Mac build, not used in GKE)
+  v2 (build :42) — Ocean Blue theme   → AMD64 + ARM64 — STABLE version serving real users on GKE
+  v3 (build :43) — Forest Green theme → AMD64 + ARM64 — NEW version being rolled out via deployment strategies
 
   DEPLOYMENT STRATEGY DEMO INTENT:
-  The theme change makes traffic routing visually obvious in the browser:
+  Each theme change makes traffic routing visually unmistakable in the browser.
+  Opening the public URL immediately reveals which version is being served:
 
-  - Rolling Update : Gold → Blue gradual pod replacement (zero downtime)
-  - Blue-Green     : Gold (blue slot) vs Blue (green slot) — instant switch via service selector
-  - Canary         : ~10% users see Blue theme, 90% still see Gold — controlled rollout
-  - Shadow         : Gold serves users, Blue receives mirrored traffic silently (responses discarded)
-  - A/B Testing    : Group A gets Gold (control), Group B gets Blue (variant) — structured experiment
+  - Rolling Update : Blue → Green gradual pod replacement, zero downtime
+  - Blue-Green     : Blue (blue slot) vs Green (green slot) — instant switch via service selector patch
+  - Canary         : ~10% users see Green theme, 90% still see Blue — controlled rollout
+  - Shadow         : Blue serves real users, Green receives mirrored traffic silently (responses discarded)
+  - A/B Testing    : Group A gets Blue (control), Group B gets Green (variant) — structured experiment
 
-  Switch between themes by patching the Kubernetes service selector to route to the new deployment.
+  Switch between themes by patching the Kubernetes service selector to route to the desired deployment.
+  No redeployment needed — just a selector patch and traffic shifts instantly.
 */
 
 :root {
-  --bg:       #0d1b2a;
-  --bg2:      #1b2d3e;
-  --bg3:      #243b52;
-  --gold:     #00b4d8;
-  --gold2:    #90e0ef;
-  --text:     #e8e8e8;
-  --muted:    #888;
-  --border:   #1e3a50;
+  --bg:       #0f1f0f;
+  --bg2:      #1a2e1a;
+  --bg3:      #243d24;
+  --gold:     #4caf50;
+  --gold2:    #a5d6a7;
+  --text:     #e8f5e9;
+  --muted:    #81a881;
+  --border:   #2e4d2e;
   --danger:   #e05555;
-  --success:  #4caf7d;
+  --success:  #69d98c;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

@@ -1,10 +1,14 @@
-# Production traffic goes to stable (v1)
-# Identical traffic mirrored to shadow (v2) - responses discarded
+# Shadow — production traffic goes to stable (v1)
+# Identical traffic mirrored to shadow (v2)
+# Shadow responses discarded — zero user impact
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aceest-backend-stable-shadow
   namespace: shadow
+  name: aceest-backend-stable-shadow
+  annotations:
+    role: production
 spec:
   replicas: 2
   selector:
@@ -14,30 +18,34 @@ spec:
       track: stable-shadow
   template:
     metadata:
-      labels:
-        app: aceest
-        tier: backend
-        track: stable-shadow
-    spec:
+  namespace: shadow
+  labels:
+      app: aceest
+      tier: backend
+      track: stable-shadow
+  spec:
       imagePullSecrets:
-      - name: dockerhub-secret
+        - name: dockerhub-secret
       containers:
-      - name: aceest-backend
-        image: sasanmanpreet91/aceest-fitness-gym-api:18
-        ports:
-        - containerPort: 5005
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5005
-          initialDelaySeconds: 10
-          periodSeconds: 5
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:42
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aceest-backend-shadow
   namespace: shadow
+  name: aceest-backend-shadow
+  annotations:
+    role: shadow-testing
 spec:
   replicas: 2
   selector:
@@ -47,21 +55,22 @@ spec:
       track: shadow
   template:
     metadata:
-      labels:
-        app: aceest
-        tier: backend
-        track: shadow
-    spec:
+  namespace: shadow
+  labels:
+      app: aceest
+      tier: backend
+      track: shadow
+  spec:
       imagePullSecrets:
-      - name: dockerhub-secret
+        - name: dockerhub-secret
       containers:
-      - name: aceest-backend
-        image: sasanmanpreet91/aceest-fitness-gym-api:21
-        ports:
-        - containerPort: 5005
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5005
-          initialDelaySeconds: 10
-          periodSeconds: 5
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:43
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5

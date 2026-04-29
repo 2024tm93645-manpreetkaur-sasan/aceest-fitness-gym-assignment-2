@@ -1,11 +1,15 @@
-# 9 stable + 1 canary = ~10% traffic to new version
+# Canary — 9 stable + 1 canary = ~10% traffic to new version
+# K8s load balances proportionally to replica count
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aceest-backend-stable
   namespace: canary
+  name: aceest-backend-stable
+  annotations:
+    role: stable
 spec:
-  replicas: 9
+  replicas: 2
   selector:
     matchLabels:
       app: aceest
@@ -13,30 +17,34 @@ spec:
       track: stable
   template:
     metadata:
-      labels:
-        app: aceest
-        tier: backend
-        track: stable
-    spec:
+  namespace: canary
+  labels:
+      app: aceest
+      tier: backend
+      track: stable
+  spec:
       imagePullSecrets:
-      - name: dockerhub-secret
+        - name: dockerhub-secret
       containers:
-      - name: aceest-backend
-        image: sasanmanpreet91/aceest-fitness-gym-api:18
-        ports:
-        - containerPort: 5005
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5005
-          initialDelaySeconds: 10
-          periodSeconds: 5
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:42
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: aceest-backend-canary
   namespace: canary
+  name: aceest-backend-canary
+  annotations:
+    role: canary
 spec:
   replicas: 1
   selector:
@@ -46,21 +54,22 @@ spec:
       track: canary
   template:
     metadata:
-      labels:
-        app: aceest
-        tier: backend
-        track: canary
+    namespace: canary
+    labels:
+      app: aceest
+      tier: backend
+      track: canary
     spec:
       imagePullSecrets:
-      - name: dockerhub-secret
+        - name: dockerhub-secret
       containers:
-      - name: aceest-backend
-        image: sasanmanpreet91/aceest-fitness-gym-api:21
-        ports:
-        - containerPort: 5005
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5005
-          initialDelaySeconds: 10
-          periodSeconds: 5
+        - name: aceest-backend
+          image: sasanmanpreet91/aceest-fitness-gym-api:43
+          ports:
+            - containerPort: 5005
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5005
+            initialDelaySeconds: 10
+            periodSeconds: 5
