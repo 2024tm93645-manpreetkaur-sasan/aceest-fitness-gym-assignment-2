@@ -80,39 +80,43 @@ pipeline {
             }
         }
 
-        // ── 5. Docker Build ───────────────────────────────────────────
-        stage('Docker Build') {
-            parallel {
-                stage('[Backend] Build') {
-                    steps {
-                        sh "docker build -t ${BACKEND_IMAGE}:${TAG} ./backend"
-                        sh "docker tag ${BACKEND_IMAGE}:${TAG} ${BACKEND_IMAGE}:latest"
-                    }
-                }
-                stage('[Frontend] Build') {
-                    steps {
-                        sh "docker build -t ${FRONTEND_IMAGE}:${TAG} ./frontend"
-                        sh "docker tag ${FRONTEND_IMAGE}:${TAG} ${FRONTEND_IMAGE}:latest"
-                    }
-                }
-            }
-        }
-
-        // ── 6. Push to Docker Hub ─────────────────────────────────────
-        stage('Push to Docker Hub') {
+        // ── 5 & 6. Docker Build + Push (multi-platform: amd64 + arm64) ──
+        stage('Docker Build & Push') {
             steps {
                 withCredentials([usernamePassword(
                     credentialsId: 'dockerhub-creds',
                     usernameVariable: 'DH_USER',
                     passwordVariable: 'DH_PASS'
                 )]) {
-                    sh '''
-                        echo $DH_PASS | docker login -u $DH_USER --password-stdin
-                        docker push ${BACKEND_IMAGE}:${TAG}
-                        docker push ${BACKEND_IMAGE}:latest
-                        docker push ${FRONTEND_IMAGE}:${TAG}
-                        docker push ${FRONTEND_IMAGE}:latest
-                    '''
+                    sh """
+                        echo \$DH_PASS | docker login -u \$DH_USER --password-stdin
+
+                        # Create/reuse buildx builder
+                        docker buildx create --use --name multi-builder \\
+                            --driver docker-container \\
+                            --platform linux/amd64,linux/arm64 2>/dev/null || \\
+                        docker buildx use multi-builder
+
+                        # Build and push backend (amd64 + arm64)
+                        docker buildx build \\
+                            --platform linux/amd64,linux/arm64 \\
+                            -t ${BACKEND_IMAGE}:${TAG} \\
+                            -t ${BACKEND_IMAGE}:latest \\
+                            --push \\
+                            ./backend
+
+                        # Build and push frontend (amd64 + arm64)
+                        docker buildx build \\
+                            --platform linux/amd64,linux/arm64 \\
+                            -t ${FRONTEND_IMAGE}:${TAG} \\
+                            -t ${FRONTEND_IMAGE}:latest \\
+                            --push \\
+                            ./frontend
+
+                        echo "Multi-platform images pushed:"
+                        echo "  ${BACKEND_IMAGE}:${TAG} (amd64 + arm64)"
+                        echo "  ${FRONTEND_IMAGE}:${TAG} (amd64 + arm64)"
+                    """
                 }
             }
         }
@@ -186,6 +190,8 @@ pipeline {
             }
         }
 
+        // ── GKE DEPLOY STAGES (commented out — enable after multi-platform images are confirmed) ──
+        /*
         // ── 9. GKE Auth + Setup ───────────────────────────────────────
         stage('GKE Auth') {
             when {
@@ -248,8 +254,8 @@ pipeline {
                             sed 's|aceest-fitness-gym-api:latest|aceest-fitness-gym-api:${TAG}|g; s|aceest-fitness-gym-ui:latest|aceest-fitness-gym-ui:${TAG}|g' \
                                 k8s/rolling-update/deployment.yaml | kubectl apply -n rolling -f -
                             kubectl apply -n rolling -f k8s/rolling-update/service.yaml
-                            kubectl rollout status deployment/aceest-backend -n rolling --timeout=180s
-                            kubectl rollout status deployment/aceest-frontend -n rolling --timeout=180s
+                            kubectl rollout status deployment/aceest-backend -n rolling --timeout=300s
+                            kubectl rollout status deployment/aceest-frontend -n rolling --timeout=300s
                             echo "Rolling Update deployed"
                         """
                     }
@@ -260,7 +266,7 @@ pipeline {
                         sh """
                             kubectl apply -n blue-green -f k8s/blue-green/deployment.yaml
                             kubectl apply -n blue-green -f k8s/blue-green/service.yaml
-                            kubectl rollout status deployment/aceest-backend-blue -n blue-green --timeout=180s
+                            kubectl rollout status deployment/aceest-backend-blue -n blue-green --timeout=300s
                             echo "Blue-Green deployed"
                         """
                     }
@@ -271,7 +277,7 @@ pipeline {
                         sh """
                             kubectl apply -n canary -f k8s/canary/deployment.yaml
                             kubectl apply -n canary -f k8s/canary/service.yaml
-                            kubectl rollout status deployment/aceest-backend-stable -n canary --timeout=180s
+                            kubectl rollout status deployment/aceest-backend-stable -n canary --timeout=300s
                             echo "Canary deployed"
                         """
                     }
@@ -282,7 +288,7 @@ pipeline {
                         sh """
                             kubectl apply -n shadow -f k8s/shadow/deployment.yaml
                             kubectl apply -n shadow -f k8s/shadow/service.yaml
-                            kubectl rollout status deployment/aceest-backend-stable-shadow -n shadow --timeout=180s
+                            kubectl rollout status deployment/aceest-backend-stable-shadow -n shadow --timeout=300s
                             echo "Shadow deployed"
                         """
                     }
@@ -293,7 +299,7 @@ pipeline {
                         sh """
                             kubectl apply -n ab-testing -f k8s/ab-testing/deployment.yaml
                             kubectl apply -n ab-testing -f k8s/ab-testing/service.yaml
-                            kubectl rollout status deployment/aceest-backend-version-a -n ab-testing --timeout=180s
+                            kubectl rollout status deployment/aceest-backend-version-a -n ab-testing --timeout=300s
                             echo "AB Testing deployed"
                         """
                     }
@@ -353,6 +359,8 @@ pipeline {
             }
         }
     }
+        */
+
 
     // ── Post Actions ──────────────────────────────────────────────────
     post {
